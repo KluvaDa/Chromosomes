@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import skimage.morphology
 from math import pi
@@ -20,31 +21,47 @@ def load_pickle(path):
 
 class RealOverlappingChromosomes(IterableDataset):
     def __init__(self,
-                 filepath_slides_intersecting: str,
-                 slides_select: Optional[Sequence[int]],
+                 dataset_directory: str,
+                 use_paired_cropped: bool,
+                 subset: Optional[Tuple[Union[int, float], Union[int, float]]],
                  separate_channels: bool,
                  half_resolution: bool = False,
+                 output_categories: Optional[int] = None,
                  dtype: np.ScalarType = np.float32):
         """
-        Returns batches of size 1 with real images of intersecting chromosomes. This includes labels
+        Returns batches of size 1 with real images of intersecting chromosomes. This includes labels.
+        channels are input (1 or 2 channels depending on separate_channels),
+        followed by labels as either a 4 category index image, or 2 channels, one for each chromosome
         Args:
-            filepath_slides_intersecting: Path to the pickle file with the real overlapping chromosomes.
-            slides_select: A list of slides to select chromosomes from randomly. 15 available (idx 0 to 14)
+            dataset_directory: Location of the real_overlapping.pickle and/or real_overlapping_paired.pickle
+            use_paired_cropped: Whether to load paired and cropped chromosomes (True) or full clusters (False)
+            subset: Tuple with lower and upper proportion in the range [0, 1] to select a subset of images
             separate_channels: if dapi and cy3 are separate (True), or combined into one channels (False)
             half_resolution: Whether to halve the resolution of the image
+            output_categories: 3 or 4 depending on how many categories to output as label. If None, ch0 and ch1 are
+                               returned as channels instead. Must be None if not use_paired_cropped.
             dtype: dtype of the outputted numpy array.
         """
-        self.filepath_slides_intersecting = filepath_slides_intersecting
-        self.slides_select = slides_select if slides_select is not None else [1,2,3,4,5,6,7,8,9,10,11,12,13,14]
+        self.dataset_directory = dataset_directory
+        self.use_paired_cropped = use_paired_cropped
+        self.subset = subset if subset is not None else [0, 1]
         self.separate_input_channels = separate_channels
         self.half_resolution = half_resolution
+        self.output_categories = output_categories
+        if output_categories is not None:
+            assert output_categories in (3, 4)
         self.dtype = dtype
 
-        self.slides = load_pickle(self.filepath_slides_intersecting)
-        self.all_image_indices = []
-        for i_slide in self.slides_select:
-            for i_image in range(len(self.slides[i_slide])):
-                self.all_image_indices.append((i_slide, i_image))
+        if not self.use_paired_cropped:
+            assert self.output_categories is None
+
+        if self.use_paired_cropped:
+            self.images = load_pickle(os.path.join(self.dataset_directory, 'real_overlapping_paired.pickle'))
+        else:
+            self.images = load_pickle(os.path.join(self.dataset_directory, 'real_overlapping.pickle'))
+
+        subset_indices = np.floor(np.array(self.subset) * len(self.images)).astype(np.int)
+        self.all_image_indices = list(range(subset_indices[0], subset_indices[1]))
 
     def __iter__(self):
         worker_info = get_worker_info()
@@ -62,9 +79,20 @@ class RealOverlappingChromosomes(IterableDataset):
     def __next__(self):
         if self.i_worker_image >= len(self.worker_image_indices):
             raise StopIteration
-        slide_index, image_index = self.worker_image_indices[self.i_worker_image]
+        image_index = self.worker_image_indices[self.i_worker_image]
         self.i_worker_image += 1
-        image = self.slides[slide_index][image_index]
+        image = self.images[image_index]
+
+        if self.output_categories is not None:
+            ch0 = image[2]
+            ch1 = image[3]
+            if self.output_categories == 3:
+                categories = ch0 + ch1
+            else:
+                categories = ch0 + 2*ch1
+            image[2] = categories
+            image = image[0:3]
+
         if self.separate_input_channels:
             pass
         else:
@@ -73,7 +101,7 @@ class RealOverlappingChromosomes(IterableDataset):
 
         if self.half_resolution:
             image = image[:, ::2, ::2]
-        image = np.expand_dims(image, 0)
+        image = image[None, ...]
 
         return image.astype(self.dtype)
 
@@ -516,20 +544,23 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     datasets = [
-        # OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], False, True, 1),
-        SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
-                                   ['dapi_cy3','4_channel'], 'length', True),
-        # RealOverlappingChromosomes('data/real_overlapping.pickle', None, False, True),
+        # OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
+        # SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
+        #                            ['dapi_cy3','4_channel'], 'length', True),
+        RealOverlappingChromosomes('data', True, (0.2, 0.9), False, True, 4),
     ]
 
     from torch.utils.data import DataLoader
 
+    images = []
     for dataset in datasets:
         # noinspection PyTypeChecker
-        dataloader = iter(DataLoader(dataset, batch_size=None))
-        for _ in range(5):
+        dataloader = iter(DataLoader(dataset, batch_size=None, num_workers=0))
+        for _ in range(10):
             batch = next(dataloader)
+            images.append(batch[0, 0, ...])
             for channel in range(batch.shape[1]):
                 plt.close()
                 plt.imshow(batch[0, channel])
                 plt.show()
+    print('Done')
