@@ -360,11 +360,11 @@ class ClassificationModule(pl.LightningModule):
 
         # calculate switched ch0/ch1 metrics
         if self.segment_4_categories:
-            prediction_classes_switched = batch_prediction_class.clone()
-            prediction_classes_switched += (prediction_classes_switched == 1).long() \
-                                         - (prediction_classes_switched == 2).long()
+            iou_switched = torch.mean(torch.stack([iou_channels[0],
+                                                   iou_channels[4],
+                                                   iou_channels[5],
+                                                   iou_channels[3]], dim=0), dim=0)
 
-            iou_switched = torch.mean(torch.stack(iou_channels[0:self.n_categories], dim=0), dim=0)
             iou_best_match = torch.maximum(iou_switched, iou)
             metrics[dataset_name+'_iou_best_match'] = torch.mean(iou_best_match)
 
