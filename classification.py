@@ -243,6 +243,8 @@ class ClassificationModule(pl.LightningModule):
         self.segment_4_categories = segment_4_categories
         self.n_categories = 4 if segment_4_categories else 3
 
+        self.save_hyperparameters()
+
         # hardcoded parameters
         n_channels_out = 4 if segment_4_categories else 3
         if smaller_network:
