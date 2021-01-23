@@ -391,7 +391,7 @@ def train(smaller_network: bool,
            f"_{'snet' if smaller_network else 'lnet'}" \
            f"_{'shuffled' if shuffle_first else 'ordered'}" \
            f"_{category_order}" \
-           f"_cv{cross_validation_i}"
+           f"/cv{cross_validation_i}"
 
     max_epochs = 128
     early_stopping_patience = 8
