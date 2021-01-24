@@ -87,36 +87,36 @@ class ClassificationDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         # original dataset
+        train_subsets_cv = {0: [(0.0, 0.6)],
+                            1: [(0.0, 0.4), (0.6, 0.8)],
+                            2: [(0.0, 0.2), (0.4, 0.8)],
+                            3: [(0.2, 0.8)]}
+        val_subsets_cv = {0: [(0.6, 0.8)],
+                          1: [(0.4, 0.6)],
+                          2: [(0.2, 0.4)],
+                          3: [(0.0, 0.2)]}
+        train_subset = train_subsets_cv[self.cross_validation_i]
+        val_subset = val_subsets_cv[self.cross_validation_i]
+        test_subset = [(0.8, 1.0)]
         if self.train_on_original:
-            train_subsets_cv = {0: [(0.0, 0.6)],
-                                1: [(0.0, 0.4), (0.6, 0.8)],
-                                2: [(0.0, 0.2), (0.4, 0.8)],
-                                3: [(0.2, 0.8)]}
-            val_subsets_cv = {0: [(0.6, 0.8)],
-                              1: [(0.4, 0.6)],
-                              2: [(0.2, 0.4)],
-                              3: [(0.0, 0.2)]}
-            train_subset = train_subsets_cv[self.cross_validation_i]
-            val_subset = val_subsets_cv[self.cross_validation_i]
-            test_subset = [(0.8, 1.0)]
             self.dataset_original_train = datasets.OriginalChromosomeDataset(self.filepath_original,
                                                                              train_subset,
                                                                              self.segment_4_categories,
                                                                              self.shuffle_first,
                                                                              self.batchsize,
                                                                              self.dtype)
-            self.dataset_original_val = datasets.OriginalChromosomeDataset(self.filepath_original,
-                                                                           val_subset,
-                                                                           self.segment_4_categories,
-                                                                           self.shuffle_first,
-                                                                           self.batchsize,
-                                                                           self.dtype)
-            self.dataset_original_test = datasets.OriginalChromosomeDataset(self.filepath_original,
-                                                                            test_subset,
-                                                                            self.segment_4_categories,
-                                                                            self.shuffle_first,
-                                                                            self.batchsize,
-                                                                            self.dtype)
+        self.dataset_original_val = datasets.OriginalChromosomeDataset(self.filepath_original,
+                                                                       val_subset,
+                                                                       self.segment_4_categories,
+                                                                       self.shuffle_first,
+                                                                       self.batchsize,
+                                                                       self.dtype)
+        self.dataset_original_test = datasets.OriginalChromosomeDataset(self.filepath_original,
+                                                                        test_subset,
+                                                                        self.segment_4_categories,
+                                                                        self.shuffle_first,
+                                                                        self.batchsize,
+                                                                        self.dtype)
         # new synthetic dataset
         train_slides_cv = {0: (0, 1, 2,  3, 4, 5,  6, 7, 8),
                            1: (0, 1, 2,  3, 4, 5,  9, 10, 11),
@@ -204,14 +204,11 @@ class ClassificationDataModule(pl.LightningDataModule):
                                      batch_size=None,
                                      num_workers=self.num_workers,
                                      pin_memory=self.num_workers > 0)
-        if self.train_on_original:
-            dataloader_original = DataLoader(self.dataset_original_val,
-                                             batch_size=None,
-                                             num_workers=self.num_workers,
-                                             pin_memory=self.num_workers > 0)
-            return dataloader_synthetic, dataloader_real, dataloader_original
-        else:
-            return dataloader_synthetic, dataloader_real
+        dataloader_original = DataLoader(self.dataset_original_val,
+                                         batch_size=None,
+                                         num_workers=self.num_workers,
+                                         pin_memory=self.num_workers > 0)
+        return dataloader_synthetic, dataloader_real, dataloader_original
 
     def test_dataloader(self):
         dataloader_synthetic = DataLoader(self.dataset_synthetic_test,
@@ -222,14 +219,11 @@ class ClassificationDataModule(pl.LightningDataModule):
                                      batch_size=None,
                                      num_workers=self.num_workers,
                                      pin_memory=self.num_workers > 0)
-        if self.train_on_original:
-            dataloader_original = DataLoader(self.dataset_original_test,
-                                             batch_size=None,
-                                             num_workers=self.num_workers,
-                                             pin_memory=self.num_workers > 0)
-            return dataloader_synthetic, dataloader_real, dataloader_original
-        else:
-            return dataloader_synthetic, dataloader_real
+        dataloader_original = DataLoader(self.dataset_original_test,
+                                         batch_size=None,
+                                         num_workers=self.num_workers,
+                                         pin_memory=self.num_workers > 0)
+        return dataloader_synthetic, dataloader_real, dataloader_original
 
 
 class ClassificationModule(pl.LightningModule):
