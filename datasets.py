@@ -335,7 +335,8 @@ class SyntheticChromosomeDataset(IterableDataset):
                 output.append(ch_0[0] + ch_1[0] + ch_0[1] + ch_1[1])
             elif output_channel == '3_channel':
                 indices = np.zeros_like(ch_0[3])
-                indices += np.logical_or(ch_0[3], ch_1[3]) + np.logical_and(ch_0[3], ch_1[3])
+                indices += np.logical_or(ch_0[3], ch_1[3]).astype(self.dtype) + \
+                           np.logical_and(ch_0[3], ch_1[3]).astype(self.dtype)
                 output.append(indices)
             elif output_channel == '4_channel':
                 indices = np.zeros_like(ch_0[3])
@@ -545,9 +546,9 @@ if __name__ == '__main__':
 
     datasets = [
         # OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
-        # SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
-        #                            ['dapi_cy3','4_channel'], 'length', True),
-        RealOverlappingChromosomes('data', True, (0.2, 0.9), False, True, 4),
+        SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
+                                   ['dapi_cy3','3_channel'], 'length', True),
+        # RealOverlappingChromosomes('data', True, (0.2, 0.9), False, True, 4),
     ]
 
     from torch.utils.data import DataLoader
