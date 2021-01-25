@@ -104,19 +104,21 @@ class ClassificationDataModule(pl.LightningDataModule):
                                                                              self.segment_4_categories,
                                                                              self.shuffle_first,
                                                                              self.batchsize,
-                                                                             self.dtype)
+                                                                             dtype=self.dtype)
         self.dataset_original_val = datasets.OriginalChromosomeDataset(self.filepath_original,
                                                                        val_subset,
                                                                        self.segment_4_categories,
                                                                        self.shuffle_first,
                                                                        self.batchsize,
-                                                                       self.dtype)
+                                                                       fix_random_seed=True,
+                                                                       dtype=self.dtype)
         self.dataset_original_test = datasets.OriginalChromosomeDataset(self.filepath_original,
                                                                         test_subset,
                                                                         self.segment_4_categories,
                                                                         self.shuffle_first,
                                                                         self.batchsize,
-                                                                        self.dtype)
+                                                                        fix_random_seed=True,
+                                                                        dtype=self.dtype)
         # new synthetic dataset
         train_slides_cv = {0: (0, 1, 2,  3, 4, 5,  6, 7, 8),
                            1: (0, 1, 2,  3, 4, 5,  9, 10, 11),
@@ -169,14 +171,14 @@ class ClassificationDataModule(pl.LightningDataModule):
         n_categories = 4 if self.segment_4_categories else 3
         # real dataset
         self.dataset_real_val = datasets.RealOverlappingChromosomes(self.filepath_real,
-                                                                    True,
+                                                                    self.segment_4_categories,
                                                                     (0, 0.5),
                                                                     separate_channels=False,
                                                                     half_resolution=True,
                                                                     output_categories=n_categories,
                                                                     dtype=self.dtype)
         self.dataset_real_test = datasets.RealOverlappingChromosomes(self.filepath_real,
-                                                                     True,
+                                                                     self.segment_4_categories,
                                                                      (0.5, 1),
                                                                      separate_channels=False,
                                                                      half_resolution=True,

@@ -1,5 +1,5 @@
 # Project exclude paths
 /venv/
 /.idea/
-/data/
 /results/
+/data/Cleaned_LowRes_13434_overlapping_pairs.h5

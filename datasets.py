@@ -39,7 +39,7 @@ class RealOverlappingChromosomes(IterableDataset):
             separate_channels: if dapi and cy3 are separate (True), or combined into one channels (False)
             half_resolution: Whether to halve the resolution of the image
             output_categories: 3 or 4 depending on how many categories to output as label. If None, ch0 and ch1 are
-                               returned as channels instead. Must be None if not use_paired_cropped.
+                               returned as channels instead. Must be None or 3 if not use_paired_cropped.
             dtype: dtype of the outputted numpy array.
         """
         self.dataset_directory = dataset_directory
@@ -53,7 +53,7 @@ class RealOverlappingChromosomes(IterableDataset):
         self.dtype = dtype
 
         if not self.use_paired_cropped:
-            assert self.output_categories is None
+            assert self.output_categories != 4
 
         if self.use_paired_cropped:
             self.images = load_pickle(os.path.join(self.dataset_directory, 'real_overlapping_paired.pickle'))
@@ -84,12 +84,12 @@ class RealOverlappingChromosomes(IterableDataset):
         image = self.images[image_index]
 
         if self.output_categories is not None:
-            ch0 = image[2]
-            ch1 = image[3]
+            chromosomes = image[2:]
             if self.output_categories == 3:
-                categories = ch0 + ch1
+                categories = np.any(chromosomes, axis=0).astype(self.dtype) + \
+                             (np.sum(chromosomes, axis=0) >= 2).astype(self.dtype)
             else:
-                categories = ch0 + 2*ch1
+                categories = chromosomes[0] + 2*chromosomes[1]
             image[2] = categories
             image = image[0:3]
 
@@ -113,6 +113,7 @@ class OriginalChromosomeDataset(IterableDataset):
                  segment_4_categories: bool,
                  shuffle_first: bool,
                  batchsize: int,
+                 fix_random_seed: bool = False,
                  dtype: np.ScalarType = np.float32):
         """
 
@@ -129,6 +130,11 @@ class OriginalChromosomeDataset(IterableDataset):
         self.batchsize = batchsize
         self.dtype = dtype
 
+        if fix_random_seed:
+            self.rng = np.random.default_rng(0)
+        else:
+            self.rng = np.random.default_rng()
+
         # load dataset
         with h5py.File(filepath, 'r') as file:
             pairs = file['13434_overlapping_chrom_pairs_LowRes'][()]
@@ -138,7 +144,7 @@ class OriginalChromosomeDataset(IterableDataset):
 
         # randomize order with a fixed seed
         if shuffle_first:
-            np.random.default_rng(seed=0).shuffle(data, axis=0)
+            self.rng.shuffle(data, axis=0)
 
         # select a subset of dataset
         n_images = data.shape[0]
@@ -166,8 +172,7 @@ class OriginalChromosomeDataset(IterableDataset):
         # select data subset for this dataloader
         self.data_for_worker = self.data[self.worker_id::self.n_workers]
         # shuffle order of data for next epoch
-        rng = np.random.default_rng()
-        rng.shuffle(self.data_for_worker)
+        self.rng.shuffle(self.data_for_worker)
         self.i_batch = 0
         return self
 
@@ -189,7 +194,7 @@ class SyntheticChromosomeDataset(IterableDataset):
                  epoch_batches: int,
                  output_channels_list: Sequence[str],
                  order: str = 'random',
-                 fix_random_seed:bool = False,
+                 fix_random_seed: bool = False,
                  dtype: np.ScalarType = np.float32):
         """
         Args:
@@ -546,9 +551,9 @@ if __name__ == '__main__':
 
     datasets = [
         # OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
-        SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
-                                   ['dapi_cy3','3_channel'], 'length', True),
-        # RealOverlappingChromosomes('data', True, (0.2, 0.9), False, True, 4),
+        # SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
+        #                            ['dapi_cy3','3_channel'], 'length', True),
+        RealOverlappingChromosomes('data', False, (0.2, 0.9), False, True, 3),
     ]
 
     from torch.utils.data import DataLoader
@@ -557,7 +562,7 @@ if __name__ == '__main__':
     for dataset in datasets:
         # noinspection PyTypeChecker
         dataloader = iter(DataLoader(dataset, batch_size=None, num_workers=0))
-        for _ in range(10):
+        for _ in range(20):
             batch = next(dataloader)
             images.append(batch[0, 0, ...])
             for channel in range(batch.shape[1]):
