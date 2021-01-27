@@ -144,7 +144,7 @@ class OriginalChromosomeDataset(IterableDataset):
 
         # randomize order with a fixed seed
         if shuffle_first:
-            self.rng.shuffle(data, axis=0)
+            np.random.default_rng().shuffle(data, axis=0)
 
         # select a subset of dataset
         n_images = data.shape[0]
