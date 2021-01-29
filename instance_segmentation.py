@@ -1,6 +1,7 @@
 import os
 from abc import ABC
-
+import urllib.request
+import tarfile
 import numpy as np
 import torch
 import torch.nn
@@ -8,13 +9,42 @@ import torch.nn.functional
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 import pytorch_lightning.metrics.functional.classification
+from math import pi
 
 from typing import Sequence, Tuple, Union, Optional
 from torch.utils.data import DataLoader
 
 import networks
 import datasets
-from representations import rep_2d_losses
+from representations import rep_2d_losses, rep_2d_pytorch
+from classification import calculate_binary_iou_batch
+
+
+def calculate_iou_separate_chromosomes(prediction_chromosomes,
+                                       label_chromosomes):
+    """
+    tensors of shape [channels, x, y]
+    :param prediction_chromosomes: tensor of individual chromosomes as channels
+    :param label_chromosomes: tensor of individual chromosomes as channels
+    :return: iou value over batch
+    """
+    n_chromosomes_label = prediction_chromosomes.shape[0]
+    n_chromosomes_prediction = label_chromosomes.shape[0]
+
+    best_iou = torch.zeros((n_chromosomes_label,))
+
+    for label_chromosomes_i in range(n_chromosomes_label):
+        for prediction_chromosome_i in range(n_chromosomes_prediction):
+            iou_batch = calculate_binary_iou_batch(
+                prediction_chromosomes[None, prediction_chromosome_i: prediction_chromosome_i + 1, ...],
+                label_chromosomes[None, label_chromosomes_i: label_chromosomes_i + 1, ...]
+            )[0, ...]
+            is_best_iou = iou_batch >= best_iou[label_chromosomes_i]
+            if is_best_iou:
+                best_iou[label_chromosomes_i] = best_iou
+
+    average_iou = torch.mean(best_iou)
+    return average_iou
 
 
 class InstanceSegmentationDataModule(pl.LightningDataModule):
@@ -66,6 +96,16 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
 
         self.dataset_real_val = None
         self.dataset_real_test = None
+
+    def prepare_data(self):
+        if not os.path.isfile(self.filepath_original):
+            tar_path = os.path.join('data', 'Cleaned_LowRes_13434_overlapping_pairs.tar.xz')
+            if not os.path.isfile(tar_path):
+                url = "https://github.com/jeanpat/DeepFISH/blob/master/dataset/" \
+                      "Cleaned_LowRes_13434_overlapping_pairs.tar.xz?raw=true"
+                filename, headers = urllib.request.urlretrieve(url, tar_path)
+            with tarfile.open(tar_path, 'r') as f:
+                f.extractall('data')
 
     def setup(self, stage=None):
         # original dataset
@@ -188,6 +228,17 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
         return dataloader_synthetic, dataloader_real, dataloader_original
 
 
+class Clustering:
+    def __init__(self):
+        raise NotImplementedError()
+
+    def direction_2_separate_chromosomes(self,
+                                         batch_3category: torch.Tensor,
+                                         batch_dilated_intersection: torch.Tensor,
+                                         batch_direction_angle: torch.Tensor):
+        raise NotImplementedError()
+
+
 class InstanceSegmentationModule(pl.LightningModule):
     def __init__(self, representation: str, smaller_network: bool):
         """
@@ -210,6 +261,12 @@ class InstanceSegmentationModule(pl.LightningModule):
             n_output_channels = 8
         else:
             raise ValueError(f"representations == '{representation}' is invalid")
+
+        self.angle_2_repr = rep_2d_pytorch.get_angle_2_repr(representation)
+        self.repr_2_angle = rep_2d_pytorch.get_repr_2_angle(representation)
+        self.angle_difference_function = rep_2d_losses.define_angular_loss_nored(pi)
+
+        self.clustering = Clustering()
 
         # hardcoded parameters
         if smaller_network:
@@ -249,47 +306,204 @@ class InstanceSegmentationModule(pl.LightningModule):
                                      output_net=None,
                                      mode_add=False)
 
-        self.representation_loss = representations.
-
-
     def forward(self, x):
-        # TODO
-        raise NotImplementedError()
+        batch_prediction = self.net(x)
+        batch_prediction_3category = torch.argmax(batch_prediction[:, 0:3, ...], dim=1, keepdim=True).detach()
+        batch_prediction_dilated_intersection = (batch_prediction[:, 3:4, ...] > 0).astype(float).detach()
+        batch_prediction_direction_angle = self.angle_2_repr(batch_prediction[:, 4:, ...]).detach()
+
+        all_separate_chromosomes = []
+        for prediction_3_category, prediction_dilated_intersection, prediction_direction_angle in \
+            zip(batch_prediction_3category, batch_prediction_dilated_intersection, batch_prediction_direction_angle):
+
+            separate_chromosomes = self.clustering.direction_2_separate_chromosomes(prediction_3_category,
+                                                                                    prediction_dilated_intersection,
+                                                                                    prediction_direction_angle)
+            all_separate_chromosomes.append(separate_chromosomes)
+
+        return batch_prediction, all_separate_chromosomes
 
     def training_step(self, batch, batch_step):
         batch_in = batch[:, 0:1, ...]
-        batch_label = batch[:, 1:, ...].long()
-        batch_prediction = self.net(batch_in)
 
-        loss = torch.nn.functional.cross_entropy(batch_prediction, batch_label)
-        metrics = self._calculate_metrics(batch_prediction, batch_label, 'training')
+        batch_label = batch_in[:, 1:, ...]
+        batch_label_3_category_index = batch_label[:, 0:1, ...].long()
+        batch_label_dilated_intersection = batch_label[:, 1:2, ...]
+        batch_label_direction_angle = batch_label[:, 2:3, ...]
+        batch_label_chromosomes = batch_label[:, 3:5, ...]
+
+        batch_prediction = self.net(batch_in)
+        batch_prediction_3_category_channels = batch_prediction[:, 0:3, ...]
+        batch_prediction_dilated_intersection = batch_prediction[:, 3:4, ...]
+        batch_prediction_direction_representation = batch_prediction[:, 4:, ...]
+
+        loss_3category = torch.nn.functional.cross_entropy(
+            batch_prediction_3_category_channels,
+            batch_label_3_category_index
+        )
+        loss_dilated_intersection = torch.nn.functional.binary_cross_entropy_with_logits(
+            batch_prediction_dilated_intersection,
+            batch_label_dilated_intersection
+        )
+
+        # only calculate direction loss on pixels that have unique chromosomes.
+        batch_label_direction_representation = self.angle_2_repr(batch_label_direction_angle)
+        loss_direction_nored = torch.nn.functional.smooth_l1_loss(
+            batch_prediction_direction_representation,
+            batch_label_direction_representation,
+            reduction='none'
+        )
+        mask = torch.eq(batch_label_3_category_index, 1).type(self.dtype)
+        loss_direction = (loss_direction_nored * mask) / torch.sum(mask)
+
+        loss = loss_3category + loss_dilated_intersection + loss_direction
+
+        # metrics
+        batch_prediction_3_category_index = torch.argmax(batch_prediction_3_category_channels, dim=1, keepdim=True)
+        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction_direction_representation)
+
+        metrics = self._calculate_metrics_raw(
+            batch_prediction_3_category_index,
+            batch_prediction_dilated_intersection,
+            batch_prediction_direction_angle,
+            batch_label_3_category_index,
+            batch_label_dilated_intersection,
+            batch_label_direction_angle,
+            'train'
+        )
+
+        all_iou_separate_chromosomes = []
+        for i_batch in range(batch.shape[0]):
+            prediction_separate_chromosomes = self.clustering.direction_2_separate_chromosomes(
+                batch_prediction_3_category_index[i_batch].detach(),
+                batch_prediction_dilated_intersection[i_batch].detach(),
+                batch_prediction_direction_angle.detach())
+            iou_separate_chromosomes = calculate_iou_separate_chromosomes(prediction_separate_chromosomes.detach(),
+                                                                          batch_label_chromosomes[i_batch, ...].detach())
+            all_iou_separate_chromosomes.append(iou_separate_chromosomes)
+        iou_separate_chromosomes = torch.mean(torch.stack(all_iou_separate_chromosomes)).detach()
+
+        metrics['train_iou_separate_chromosomes'] = iou_separate_chromosomes
+
         metrics['loss'] = loss
+        metrics['loss_3category'] = loss_3category
+        metrics['loss_dilated_intersection'] = loss_dilated_intersection
+        metrics['loss_direction'] = loss_direction
+
         self.log_dict(metrics, on_step=True)
+
         return loss
 
     def validation_step(self, batch, batch_step, dataloader_idx):
-        batch_prediction, batch_label = self._step_core(batch)
+        batch_in = batch[:, 0:1, ...].detach()
+        batch_label = batch_in[:, 1:, ...].detach()
+
+        batch_prediction = self.net(batch_in)
+        batch_prediction_3_category_channels = batch_prediction[:, 0:3, ...]
+        batch_prediction_dilated_intersection = batch_prediction[:, 3:4, ...]
+        batch_prediction_direction_representation = batch_prediction[:, 4:, ...]
+
+        # raw metrics
+        batch_prediction_3_category_index = torch.argmax(batch_prediction_3_category_channels, dim=1, keepdim=True)
+        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction_direction_representation)
 
         if dataloader_idx == 0:
             dataset_name = 'val_synthetic'
+            batch_label_3_category_index = batch_label[:, 0:1, ...].long()
+            batch_label_dilated_intersection = batch_label[:, 1:2, ...]
+            batch_label_direction_angle = batch_label[:, 2:3, ...]
+            batch_label_chromosomes = batch_label[:, 3:5, ...]
+
+            metrics = self._calculate_metrics_raw(
+                batch_prediction_3_category_index,
+                batch_prediction_dilated_intersection,
+                batch_prediction_direction_angle,
+                batch_label_3_category_index,
+                batch_label_dilated_intersection,
+                batch_label_direction_angle,
+                dataset_name
+            )
         elif dataloader_idx == 1:
             dataset_name = 'val_real'
+            metrics = dict()
+            batch_label_chromosomes = batch_label
         else:
             dataset_name = 'val_original'
-        metrics = self._calculate_metrics(batch_prediction, batch_label, dataset_name)
+            metrics = dict()
+            batch_label_ch0 = torch.logical_or(torch.eq(batch_label, 1), torch.eq(batch_label, 3)).type(self.dtype)
+            batch_label_ch1 = torch.logical_or(torch.eq(batch_label, 2), torch.eq(batch_label, 3)).type(self.dtype)
+            batch_label_chromosomes = torch.cat([batch_label_ch0, batch_label_ch1], dim=1)
+
+        all_iou_separate_chromosomes = []
+        for i_batch in range(batch.shape[0]):
+            prediction_separate_chromosomes = self.clustering.direction_2_separate_chromosomes(
+                batch_prediction_3_category_index[i_batch],
+                batch_prediction_dilated_intersection[i_batch],
+                batch_prediction_direction_angle)
+            iou_separate_chromosomes = calculate_iou_separate_chromosomes(prediction_separate_chromosomes,
+                                                                          batch_label_chromosomes[
+                                                                              i_batch, ...])
+            all_iou_separate_chromosomes.append(iou_separate_chromosomes)
+        iou_separate_chromosomes = torch.mean(torch.stack(all_iou_separate_chromosomes))
+
+        metrics[f"{dataset_name}_iou_separate_chromosomes"] = iou_separate_chromosomes
 
         self.log_dict(metrics, on_epoch=True)
 
     def test_step(self, batch, batch_step, dataloader_idx):
-        batch_prediction, batch_label = self._step_core(batch)
+        """ same as val only different dataset_name"""
+        batch_in = batch[:, 0:1, ...].detach()
+        batch_label = batch_in[:, 1:, ...].detach()
+
+        batch_prediction = self.net(batch_in)
+        batch_prediction_3_category_channels = batch_prediction[:, 0:3, ...]
+        batch_prediction_dilated_intersection = batch_prediction[:, 3:4, ...]
+        batch_prediction_direction_representation = batch_prediction[:, 4:, ...]
+
+        # raw metrics
+        batch_prediction_3_category_index = torch.argmax(batch_prediction_3_category_channels, dim=1, keepdim=True)
+        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction_direction_representation)
 
         if dataloader_idx == 0:
             dataset_name = 'test_synthetic'
+            batch_label_3_category_index = batch_label[:, 0:1, ...].long()
+            batch_label_dilated_intersection = batch_label[:, 1:2, ...]
+            batch_label_direction_angle = batch_label[:, 2:3, ...]
+            batch_label_chromosomes = batch_label[:, 3:5, ...]
+
+            metrics = self._calculate_metrics_raw(
+                batch_prediction_3_category_index,
+                batch_prediction_dilated_intersection,
+                batch_prediction_direction_angle,
+                batch_label_3_category_index,
+                batch_label_dilated_intersection,
+                batch_label_direction_angle,
+                dataset_name
+            )
         elif dataloader_idx == 1:
             dataset_name = 'test_real'
+            metrics = dict()
+            batch_label_chromosomes = batch_label
         else:
             dataset_name = 'test_original'
-        metrics = self._calculate_metrics(batch_prediction, batch_label, dataset_name)
+            metrics = dict()
+            batch_label_ch0 = torch.logical_or(torch.eq(batch_label, 1), torch.eq(batch_label, 3)).type(self.dtype)
+            batch_label_ch1 = torch.logical_or(torch.eq(batch_label, 2), torch.eq(batch_label, 3)).type(self.dtype)
+            batch_label_chromosomes = torch.cat([batch_label_ch0, batch_label_ch1], dim=1)
+
+        all_iou_separate_chromosomes = []
+        for i_batch in range(batch.shape[0]):
+            prediction_separate_chromosomes = self.clustering.direction_2_separate_chromosomes(
+                batch_prediction_3_category_index[i_batch],
+                batch_prediction_dilated_intersection[i_batch],
+                batch_prediction_direction_angle)
+            iou_separate_chromosomes = calculate_iou_separate_chromosomes(prediction_separate_chromosomes,
+                                                                          batch_label_chromosomes[
+                                                                              i_batch, ...])
+            all_iou_separate_chromosomes.append(iou_separate_chromosomes)
+        iou_separate_chromosomes = torch.mean(torch.stack(all_iou_separate_chromosomes))
+
+        metrics[f"{dataset_name}_iou_separate_chromosomes"] = iou_separate_chromosomes
 
         self.log_dict(metrics, on_epoch=True)
 
@@ -297,51 +511,72 @@ class InstanceSegmentationModule(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters())
         return optimizer
 
+    def _calculate_metrics_raw(self,
+                               batch_prediction_3_category_index,
+                               batch_prediction_dilated_intersection,
+                               batch_prediction_direction_angle,
+                               batch_label_3_category_index,
+                               batch_label_dilated_intersection,
+                               batch_label_direction_angle,
+                               dataset_name):
+        """
+        Only works on synthetic dataset. Tensors of shape [batch, channels, x, y]
+        """
+        batch_prediction_3_category_index = batch_prediction_3_category_index.detach()
+        batch_prediction_dilated_intersection = batch_prediction_dilated_intersection.detach()
+        batch_prediction_direction_angle = batch_prediction_direction_angle.detach()
+        batch_label_3_category_index = batch_label_3_category_index.detach()
+        batch_label_dilated_intersection = batch_label_dilated_intersection.detach()
+        batch_label_direction_angle = batch_label_direction_angle.detach()
 
-    def _calculate_metrics(self, batch_prediction, batch_label, dataset_name):
-        batch_prediction = batch_prediction.detach()
-        batch_label = batch_label.detach()
+        iou_channels = [
+            torch.mean(
+                calculate_binary_iou_batch(
+                    torch.eq(batch_prediction_3_category_index, i),
+                    torch.eq(batch_label_3_category_index, i)
+                )
+            )
+            for i in range(3)
+        ]
+        iou_3category = torch.mean(torch.stack(iou_channels))
 
-        batch_prediction_class = torch.argmax(batch_prediction, dim=1)
+        iou_dilated_intersection = torch.mean(
+            calculate_binary_iou_batch(
+                batch_prediction_dilated_intersection > 0,
+                batch_label_dilated_intersection > 0
+            )
+        )
 
-        if self.segment_4_categories:
-            iou_channel_pairs = [(0, 0), (1, 1), (2, 2), (3, 3), (1, 2), (2, 1)]
-        else:
-            iou_channel_pairs = [(0, 0), (1, 1), (2, 2)]
+        angle_difference = self.angle_difference_function(batch_prediction_direction_angle,
+                                                          batch_label_direction_angle)
+        mask = torch.eq(batch_prediction_3_category_index, 1).type(self.dtype)
+        max_angle_difference = torch.amax(angle_difference * mask, dim=[1, 2, 3])
+        sum_angle_difference = torch.sum(angle_difference * mask, dim=[1, 2, 3])
 
-        iou_channels = [calculate_binary_iou_batch(batch_prediction_class == i_pred, batch_label == i_label)
-                        for i_pred, i_label in iou_channel_pairs]
+        metric_max_angle = torch.mean(max_angle_difference)
+        metric_average_angle = torch.mean(sum_angle_difference / torch.sum(mask, dim=[1, 2, 3]))
 
-        iou = torch.mean(torch.stack(iou_channels[0:self.n_categories], dim=0), dim=0)
+        main_metric = metric_average_angle + \
+                      (1 - iou_channels[0])/4 + \
+                      (1 - iou_channels[1])/4 + \
+                      (1 - iou_channels[2])/4 + \
+                      (1 - iou_dilated_intersection)/4
 
-        metrics = {dataset_name+'_iou': torch.mean(iou),
-                   dataset_name+'_iou_background': torch.mean(iou_channels[0])}
-        if self.segment_4_categories:
-            metrics[dataset_name+'_iou_ch0'] = torch.mean(iou_channels[1])
-            metrics[dataset_name+'_iou_ch1'] = torch.mean(iou_channels[2])
-            metrics[dataset_name+'_iou_overlap'] = torch.mean(iou_channels[3])
-        else:
-            metrics[dataset_name+'_iou_ch'] = torch.mean(iou_channels[1])
-            metrics[dataset_name+'_iou_overlap'] = torch.mean(iou_channels[2])
-
-        # calculate switched ch0/ch1 metrics
-        if self.segment_4_categories:
-            iou_switched = torch.mean(torch.stack([iou_channels[0],
-                                                   iou_channels[4],
-                                                   iou_channels[5],
-                                                   iou_channels[3]], dim=0), dim=0)
-
-            iou_best_match = torch.maximum(iou_switched, iou)
-            metrics[dataset_name+'_iou_best_match'] = torch.mean(iou_best_match)
-
-            switched_better = iou_switched > iou
-            standard_better = iou_switched < iou
-
-            iou_ch0_best_match = switched_better * iou_channels[4] + standard_better * iou_channels[1]
-            iou_ch1_best_match = switched_better * iou_channels[5] + standard_better * iou_channels[2]
-            metrics[dataset_name+'_iou_ch0_best_match'] = torch.mean(iou_ch0_best_match)
-            metrics[dataset_name+'_iou_ch1_best_match'] = torch.mean(iou_ch1_best_match)
+        metrics = {
+            f"{dataset_name}_iou_background": iou_channels[0],
+            f"{dataset_name}_iou_ch": iou_channels[1],
+            f"{dataset_name}_iou_overlap": iou_channels[2],
+            f"{dataset_name}_iou_3category": iou_3category,
+            f"{dataset_name}_iou_dilated_intersection": iou_dilated_intersection,
+            f"{dataset_name}_average_angle": metric_average_angle,
+            f"{dataset_name}_max_angle": metric_max_angle,
+            f"{dataset_name}_main_metric": main_metric
+        }
 
         return metrics
+
+
+
+
 
 

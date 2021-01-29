@@ -1,6 +1,7 @@
 import os
 from abc import ABC
-
+import urllib.request
+import tarfile
 import numpy as np
 import torch
 import torch.nn
@@ -20,12 +21,14 @@ def calculate_binary_iou_batch(prediction, label):
     """
     Calculates an iou core for binary tensors, maintaining the batch dimension.
     Defaults to a value of 0 if the union is 0
-    :param prediction: binary tensor of shape (batch, x, y)
-    :param label: binary tensor of shape (batch, x, y)
+    :param prediction: binary tensor of shape (batch, 1, x, y)
+    :param label: binary tensor of shape (batch, 1, x, y)
     :return: tensor of shape (batch)
     """
-    intersection = torch.sum(torch.logical_and(prediction, label), dim=[1, 2])
-    union = torch.sum(torch.logical_or(prediction, label), dim=[1, 2])
+    assert prediction.shape[1] == 1
+    assert label.shape[1] == 1
+    intersection = torch.sum(torch.logical_and(prediction, label), dim=[1, 2, 3])
+    union = torch.sum(torch.logical_or(prediction, label), dim=[1, 2, 3])
     iou = torch.div(intersection, union)
     iou[torch.logical_or(torch.isinf(iou), torch.isnan(iou))] = 0
     return iou
@@ -85,6 +88,16 @@ class ClassificationDataModule(pl.LightningDataModule):
 
         self.dataset_real_val = None
         self.dataset_real_test = None
+
+    def prepare_data(self):
+        if not os.path.isfile(self.filepath_original):
+            tar_path = os.path.join('data', 'Cleaned_LowRes_13434_overlapping_pairs.tar.xz')
+            if not os.path.isfile(tar_path):
+                url = "https://github.com/jeanpat/DeepFISH/blob/master/dataset/" \
+                      "Cleaned_LowRes_13434_overlapping_pairs.tar.xz?raw=true"
+                filename, headers = urllib.request.urlretrieve(url, tar_path)
+            with tarfile.open(tar_path, 'r') as f:
+                f.extractall('data')
 
     def setup(self, stage=None):
         # original dataset
@@ -286,7 +299,7 @@ class ClassificationModule(pl.LightningModule):
 
     def training_step(self, batch, batch_step):
         batch_prediction, batch_label = self._step_core(batch)
-        loss = torch.nn.functional.cross_entropy(batch_prediction, batch_label)
+        loss = torch.nn.functional.cross_entropy(batch_prediction, batch_label[:, 0, ...])
         metrics = self._calculate_metrics(batch_prediction, batch_label, 'training')
         metrics['loss'] = loss
         self.log_dict(metrics, on_step=True)
@@ -324,7 +337,7 @@ class ClassificationModule(pl.LightningModule):
 
     def _step_core(self, batch):
         batch_in = batch[:, 0:1, ...]
-        batch_label = batch[:, 1, ...].long()
+        batch_label = batch[:, 1:2, ...].long()
         batch_prediction = self.net(batch_in)
 
         return batch_prediction, batch_label
@@ -333,14 +346,15 @@ class ClassificationModule(pl.LightningModule):
         batch_prediction = batch_prediction.detach()
         batch_label = batch_label.detach()
 
-        batch_prediction_class = torch.argmax(batch_prediction, dim=1)
+        batch_prediction_class = torch.argmax(batch_prediction, dim=1, keepdim=True)
 
         if self.segment_4_categories:
             iou_channel_pairs = [(0, 0), (1, 1), (2, 2), (3, 3), (1, 2), (2, 1)]
         else:
             iou_channel_pairs = [(0, 0), (1, 1), (2, 2)]
 
-        iou_channels = [calculate_binary_iou_batch(batch_prediction_class == i_pred, batch_label == i_label)
+        iou_channels = [calculate_binary_iou_batch(torch.eq(batch_prediction_class, i_pred),
+                                                   torch.eq(batch_label, i_label))
                         for i_pred, i_label in iou_channel_pairs]
 
         iou = torch.mean(torch.stack(iou_channels[0:self.n_categories], dim=0), dim=0)

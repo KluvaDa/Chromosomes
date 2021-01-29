@@ -550,10 +550,10 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     datasets = [
-        # OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
+        OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
         # SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
         #                            ['dapi_cy3','3_channel'], 'length', True),
-        RealOverlappingChromosomes('data', False, (0.2, 0.9), False, True, 3),
+        # RealOverlappingChromosomes('data', False, (0.2, 0.9), False, True, 3),
     ]
 
     from torch.utils.data import DataLoader
@@ -562,7 +562,7 @@ if __name__ == '__main__':
     for dataset in datasets:
         # noinspection PyTypeChecker
         dataloader = iter(DataLoader(dataset, batch_size=None, num_workers=0))
-        for _ in range(20):
+        for _ in range(2):
             batch = next(dataloader)
             images.append(batch[0, 0, ...])
             for channel in range(batch.shape[1]):
