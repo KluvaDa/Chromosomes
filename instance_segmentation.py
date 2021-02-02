@@ -10,14 +10,17 @@ import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 import pytorch_lightning.metrics.functional.classification
 from math import pi
+import scipy.ndimage.morphology
 
-from typing import Sequence, Tuple, Union, Optional
+
+from typing import Sequence, Tuple, Union, Optional, List
 from torch.utils.data import DataLoader
 
 import networks
 import datasets
 from representations import rep_2d_losses, rep_2d_pytorch
 from classification import calculate_binary_iou_batch
+from clustering import Clustering
 
 
 def calculate_iou_separate_chromosomes(prediction_chromosomes,
@@ -227,16 +230,6 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
                                          pin_memory=self.num_workers > 0)
         return dataloader_synthetic, dataloader_real, dataloader_original
 
-
-class Clustering:
-    def __init__(self):
-        raise NotImplementedError()
-
-    def direction_2_separate_chromosomes(self,
-                                         batch_3category: torch.Tensor,
-                                         batch_dilated_intersection: torch.Tensor,
-                                         batch_direction_angle: torch.Tensor):
-        raise NotImplementedError()
 
 
 class InstanceSegmentationModule(pl.LightningModule):
