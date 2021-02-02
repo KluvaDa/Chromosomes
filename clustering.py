@@ -64,19 +64,19 @@ class Clustering:
         :param direction_angle: float tensor of the angle defined in areas with index_3category == 1
         :return: A binary tensor of shape (chromosomes, x, y)
         """
-        unique = np.eq(index_3category, 1)
-        intersection = np.eq(index_3category, 2)
-        dilated_intersection = np.gt(dilated_intersection, 0)
+        unique = np.equal(index_3category, 1)
+        intersection = np.equal(index_3category, 2)
+        dilated_intersection = np.greater(dilated_intersection, 0)
         direction_angle = np.mod(direction_angle, pi)
-        da_vector = representations.rep_2d_numpy.angle_2_da_vector(direction_angle[np.newaxis, np.newaxis, :, :])[0]
+        da_vector = representations.rep_2d_numpy.angle_2_da_vector(direction_angle[np.newaxis, :, :, :])[0]
 
         # delete areas of intersection that are too small
         intersection, dilated_intersection = self.remove_small_intersection(intersection, dilated_intersection)
 
         dilated_unique = np.logical_and(unique, np.logical_not(dilated_intersection))
 
-        distance = scipy.ndimage.morphology.distance_transform_cdt(unique.cpu().numpy())
-        distance_dilated = scipy.ndimage.morphology.distance_transform_cdt(dilated_unique.cpu().numpy())
+        distance = scipy.ndimage.morphology.distance_transform_cdt(unique)
+        distance_dilated = scipy.ndimage.morphology.distance_transform_cdt(dilated_unique)
 
         clusters_dilated = self.distance_clustering(distance_dilated)
         clusters = self.distance_clustering_with_seed(distance, clusters_dilated)
@@ -151,7 +151,7 @@ class Clustering:
 
         new_clusters_expiry = [0] * (np.max(clusters) + 1)  # idx 0 for background
 
-        selem = np.ones((3, 3))
+        selem = np.ones((1, 3, 3))
 
         for current_distance in reversed(range(1, np.max(distance_image) + 1)):
             # grow clusters until all points in specific range are covered. Separate points will be added as new labels
@@ -218,7 +218,7 @@ class Clustering:
 
         channels_grown = skimage.morphology.binary_dilation(
             channels,
-            selem=np.expand_dims(get_disk(self.cluster_grow_radius), axis=0)
+            selem=get_disk(self.cluster_grow_radius)[None, :, :]
         )
 
         channels_to_delete = []
@@ -237,7 +237,7 @@ class Clustering:
                     continue
 
                 # if direction discrepancy in intersection is too big the continue
-                average_da_vector = calculate_average_da_vector(channel_intersection, da_vector, False)
+                average_da_vector = calculate_average_da_vector(channel_intersection[0], da_vector, False)
                 magnitude_average_da_vector = np.sqrt(average_da_vector[0] ** 2 + average_da_vector[1] ** 2)
                 if magnitude_average_da_vector < self.direction_sensitivity:
                     continue
@@ -274,8 +274,10 @@ class Clustering:
             return channels
 
         # separate intersection into channels (if multiple intersections)
-        grown_intersection = skimage.morphology.binary_dilation(intersection,
-                                                                selem=get_disk(self.intersection_grow_radius))
+        grown_intersection = skimage.morphology.binary_dilation(
+            intersection,
+            selem=get_disk(self.intersection_grow_radius)[None, :, :]
+        )
         grown_intersection_clusters, _ = ndimage.label(grown_intersection)
 
         grown_intersection_channels = cluster_idx_2_channels(grown_intersection_clusters)
@@ -424,7 +426,7 @@ def calculate_average_da_vector(mask: np.ndarray, da_vector: np.ndarray, normali
     """
     Returns the mean da_vector in a given area.
     Args:
-        mask: np array, 2D (no channel dim), defining the area to average in
+        mask: np array of shape (x, y), defining the area to average in
         da_vector: np array, channel first, double-angle direction representation
         normalise: Whether to normalise the magnitude of the resultant vector.
     Returns: A vector as a tuple.
@@ -458,11 +460,11 @@ def combine_channels_and_intersection(channels: np.ndarray,
         return channels
 
     # separate intersection into channels (if multiple intersections)
-    grown_intersection = skimage.morphology.binary_dilation(intersection, selem=np.ones((3, 3)))
+    grown_intersection = skimage.morphology.binary_dilation(intersection, selem=np.ones((1, 3, 3)))
     grown_intersection_clusters, _ = ndimage.label(grown_intersection)
 
     grown_intersection_channels = cluster_idx_2_channels(grown_intersection_clusters)
-    intersection_channels = np.logical_and(grown_intersection_channels, np.expand_dims(intersection, axis=0))
+    intersection_channels = np.logical_and(grown_intersection_channels, intersection)
 
     for intersection_channel_i in range(intersection_channels.shape[0]):
         # find channels in intersection surroundings
@@ -499,7 +501,9 @@ def cluster_idx_2_channels(clusters: np.ndarray) -> np.ndarray:
         clusters: 2D np array of int indices
     Returns: channels first np array of channels
     """
-    channels = np.stack([clusters == idx for idx in range(1, np.max(clusters) + 1)])
+    if np.max(clusters) == 0:
+        return np.zeros((0, clusters.shape[1], clusters.shape[2]))
+    channels = np.concatenate([clusters == idx for idx in range(1, np.max(clusters) + 1)], axis=0)
     return channels
 
 
