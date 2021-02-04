@@ -516,6 +516,7 @@ class InstanceSegmentationModule(pl.LightningModule):
         metrics[f"{dataset_name}_iou_separate_chromosomes"] = iou_separate_chromosomes
 
         self.log_dict(metrics, on_epoch=True)
+        return metrics
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters())
@@ -641,6 +642,9 @@ def train_all():
 
 if __name__ == '__main__':
     train_all()
+
+
+
 
 
 

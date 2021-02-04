@@ -1,11 +1,13 @@
 import torch
 import pytorch_lightning as pl
+from pytorch_lightning import loggers as pl_loggers
+import pandas as pd
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas
 
-import instance_segmentation
+from instance_segmentation import InstanceSegmentationModule, InstanceSegmentationDataModule
 
 
 def load_module(dirpath: str, cross_validation: int):
@@ -25,18 +27,41 @@ def load_module(dirpath: str, cross_validation: int):
     checkpoint = os.path.join(checkpoints_dir, checkpoint_name)
 
     # load module
-    instance_segmentation_module = instance_segmentation.InstanceSegmentationModule.load_from_checkpoint(checkpoint)
+    instance_segmentation_module = InstanceSegmentationModule.load_from_checkpoint(checkpoint)
     return instance_segmentation_module
 
+
 def evaluate(root_path: str, run_name: str):
-    pass
+    run_name_parts = run_name.split('_')
+    separate_input_channels = run_name_parts[-1] == 'separate'
+
+    dirpath = os.path.join(root_path, run_name)
+    all_cv_metrics = []
+    for i_cv in (0, 1, 2, 3):
+        data_module = InstanceSegmentationDataModule(i_cv, separate_input_channels)
+        module = load_module(dirpath, i_cv)
+        trainer = pl.Trainer(gpus=1)
+        test_metrics = trainer.test(module, datamodule=data_module)
+        test_metrics = pd.DataFrame(test_metrics)
+        test_metrics = test_metrics.mean()  # no repetition, should merely flatten
+        all_cv_metrics.append(test_metrics)
+    average_metrics = pd.concat(all_cv_metrics)
+    average_metrics = average_metrics.mean()
+    print('Done')
+    return average_metrics
+
 
 def evaluate_all():
     root_path = 'results/instance_segmentation'
     run_names = os.listdir(root_path)
+    all_metrics = dict()
     for run_name in run_names:
         if os.path.isdir(os.path.join(root_path, run_name)):
-            evaluate(root_path, run_name)
+            metrics = evaluate(root_path, run_name)
+            all_metrics[run_name] = metrics
+    all_metrics = pd.concat(all_metrics, axis=1, keys=run_names)
+    all_metrics.to_csv('results/instance_segmentation_test_metrics.csv')
 
 
-
+if __name__ == '__main__':
+    evaluate_all()
