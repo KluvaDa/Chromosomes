@@ -266,6 +266,7 @@ class InstanceSegmentationModule(pl.LightningModule):
 
         self.representation = representation
         self.separate_input_channels = separate_input_channels
+        n_channels_in = 2 if separate_input_channels else 1
 
         if representation == 'angle':
             n_output_channels = 5
@@ -293,7 +294,7 @@ class InstanceSegmentationModule(pl.LightningModule):
                                               groups=1,
                                               norm_layer=torch.nn.BatchNorm2d,
                                               raw_output=False)
-            self.net = networks.Unet(n_channels_in=1,
+            self.net = networks.Unet(n_channels_in=n_channels_in,
                                      n_channels_out=n_output_channels,
                                      n_channels_start=64,
                                      depth_encoder=2,
@@ -311,7 +312,7 @@ class InstanceSegmentationModule(pl.LightningModule):
                                               groups=1,
                                               norm_layer=torch.nn.BatchNorm2d,
                                               raw_output=False)
-            self.net = networks.Unet(n_channels_in=1,
+            self.net = networks.Unet(n_channels_in=n_channels_in,
                                      n_channels_out=n_output_channels,
                                      n_channels_start=64,
                                      depth_encoder=2,
@@ -628,7 +629,7 @@ def train(representation: str,
 
 def train_all():
     for smaller_network in (False, True):
-        for separate_input_channels in (False, True):
+        for separate_input_channels in (True, False):
             for representation in ('angle',
                                    'vector',
                                    'da_vector',
