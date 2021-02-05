@@ -45,7 +45,7 @@ def evaluate(root_path: str, run_name: str):
         test_metrics = test_metrics.mean()  # no repetition, should merely flatten
         all_cv_metrics.append(test_metrics)
     average_metrics = pd.concat(all_cv_metrics)
-    average_metrics = average_metrics.mean()
+    average_metrics = average_metrics.groupby(average_metrics.index).mean()
     return average_metrics
 
 
