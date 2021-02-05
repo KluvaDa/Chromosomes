@@ -46,7 +46,6 @@ def evaluate(root_path: str, run_name: str):
         all_cv_metrics.append(test_metrics)
     average_metrics = pd.concat(all_cv_metrics)
     average_metrics = average_metrics.mean()
-    print('Done')
     return average_metrics
 
 
@@ -58,7 +57,7 @@ def evaluate_all():
         if os.path.isdir(os.path.join(root_path, run_name)):
             metrics = evaluate(root_path, run_name)
             all_metrics[run_name] = metrics
-    all_metrics = pd.concat(all_metrics, axis=1, keys=run_names)
+    all_metrics = pd.DataFrame(all_metrics)
     all_metrics.to_csv('results/instance_segmentation_test_metrics.csv')
 
 
