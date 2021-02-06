@@ -283,7 +283,20 @@ class InstanceSegmentationModule(pl.LightningModule):
         self.repr_2_angle = rep_2d_pytorch.get_repr_2_angle(representation)
         self.angle_difference_function = rep_2d_losses.define_angular_loss_nored(pi)
 
-        self.clustering = Clustering()
+
+        clustering_parameters = {
+            'minimum_dilated_intersection_area': 28,
+            'max_distance': 7,
+            'merge_peaks_distance': 2,
+            'minimum_clusters_area': 10,
+            'minimum_adjacent_area': 20,
+            'direction_sensitivity': 0.43871344895396364,
+            'cluster_grow_radius': 1.0,
+            'max_chromosome_width': 27,
+            'intersection_grow_radius': 1.2193580337740715,
+            'direction_local_weight': 0.9175349822623694}
+
+        self.clustering = Clustering(**clustering_parameters)
 
         # hardcoded parameters
         if smaller_network:
