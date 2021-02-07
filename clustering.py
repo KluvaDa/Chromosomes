@@ -16,16 +16,16 @@ class Clustering:
     The hyperparameters are saved in the __init__ funciton.
     """
     def __init__(self,
-                 minimum_dilated_intersection_area: int = 8,
-                 max_distance: int = 8,
-                 merge_peaks_distance: int = 2,
-                 minimum_clusters_area: int = 5,
-                 minimum_adjacent_area: int = 5,
-                 direction_sensitivity: float = 0.7,
-                 cluster_grow_radius: Union[float, int] = 3.5,
-                 max_chromosome_width: int = 26,
-                 intersection_grow_radius: Union[float, int] = 3.5,
-                 direction_local_weight: float = 0.5):
+                 minimum_dilated_intersection_area: int = 30,
+                 max_distance: int = 4,
+                 merge_peaks_distance: int = 1,
+                 minimum_clusters_area: int = 10,
+                 minimum_adjacent_area: int = 8,
+                 direction_sensitivity: float = 0.87,
+                 cluster_grow_radius: Union[float, int] = 1.2,
+                 max_chromosome_width: int = 10,
+                 intersection_grow_radius: Union[float, int] = 1.5,
+                 direction_local_weight: float = 0.9):
         """
         Save the hyperparameters.
         :param minimum_dilated_intersection_area: Delete intersections that are smaller
