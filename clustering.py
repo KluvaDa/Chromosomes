@@ -68,7 +68,7 @@ class Clustering:
         intersection = np.equal(index_3category, 2)
         dilated_intersection = np.greater(dilated_intersection, 0)
         direction_angle = np.mod(direction_angle, pi)
-        da_vector = representations.rep_2d_numpy.angle_2_da_vector(direction_angle[np.newaxis, :, :, :])[0]
+        da_vector = representations.rep_2d_numpy.angle_2_da_vector(direction_angle[None, :, :, :])[0]
 
         # delete areas of intersection that are too small
         intersection, dilated_intersection = self.remove_small_intersection(intersection, dilated_intersection)

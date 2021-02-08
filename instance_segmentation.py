@@ -339,16 +339,18 @@ class InstanceSegmentationModule(pl.LightningModule):
     def forward(self, x):
         batch_prediction = self.net(x)
         batch_prediction_3category = torch.argmax(batch_prediction[:, 0:3, ...], dim=1, keepdim=True).detach()
-        batch_prediction_dilated_intersection = (batch_prediction[:, 3:4, ...] > 0).astype(float).detach()
+        batch_prediction_dilated_intersection = (batch_prediction[:, 3:4, ...] > 0).type(self.dtype).detach()
         batch_prediction_direction_angle = self.angle_2_repr(batch_prediction[:, 4:, ...]).detach()
 
         all_separate_chromosomes = []
         for prediction_3_category, prediction_dilated_intersection, prediction_direction_angle in \
             zip(batch_prediction_3category, batch_prediction_dilated_intersection, batch_prediction_direction_angle):
 
-            separate_chromosomes = self.clustering.direction_2_separate_chromosomes(prediction_3_category,
-                                                                                    prediction_dilated_intersection,
-                                                                                    prediction_direction_angle)
+            separate_chromosomes = self.clustering.direction_2_separate_chromosomes(
+                prediction_3_category.numpy(),
+                prediction_dilated_intersection.numpy(),
+                prediction_direction_angle.numpy()
+            )
             all_separate_chromosomes.append(separate_chromosomes)
 
         return batch_prediction, all_separate_chromosomes
@@ -512,6 +514,7 @@ class InstanceSegmentationModule(pl.LightningModule):
             batch_label_chromosomes = torch.cat([batch_label_ch0, batch_label_ch1], dim=1)
 
         all_iou_separate_chromosomes = []
+        all_n_separate_chromosomes_difference = []
         for i_batch in range(batch.shape[0]):
             prediction_separate_chromosomes = self.clustering.direction_2_separate_chromosomes(
                 batch_prediction_3_category_index[i_batch].detach().cpu().numpy(),
@@ -519,14 +522,20 @@ class InstanceSegmentationModule(pl.LightningModule):
                 batch_prediction_direction_angle[i_batch].detach().cpu().numpy()
             )
             prediction_separate_chromosomes = torch.from_numpy(prediction_separate_chromosomes).type_as(batch)
+            n_prediction_separated_chromosomes = prediction_separate_chromosomes.shape[0]
+            n_label_separated_chromosomes = batch_label_chromosomes.shape[1]
+            n_predicted_chromosomes_difference = abs(n_prediction_separated_chromosomes - n_label_separated_chromosomes)
+            all_n_separate_chromosomes_difference.append(torch.Tensor([n_predicted_chromosomes_difference]))
 
             iou_separate_chromosomes = calculate_iou_separate_chromosomes(
                 prediction_separate_chromosomes,
                 batch_label_chromosomes[i_batch, ...]
             )
             all_iou_separate_chromosomes.append(iou_separate_chromosomes)
+        n_predicted_chromosomes_difference = torch.mean(torch.stack(all_n_separate_chromosomes_difference))
         iou_separate_chromosomes = torch.mean(torch.stack(all_iou_separate_chromosomes))
 
+        metrics[f"{dataset_name}_n_chromosomes_difference"] = n_predicted_chromosomes_difference
         metrics[f"{dataset_name}_iou_separate_chromosomes"] = iou_separate_chromosomes
 
         self.log_dict(metrics, on_epoch=True)

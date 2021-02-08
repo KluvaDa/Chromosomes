@@ -1,12 +1,16 @@
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
+from matplotlib.colors import hsv_to_rgb
 import pandas as pd
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 from clustering import Clustering
 import ax
+from math import pi
+
+from typing import Optional
 
 from instance_segmentation import InstanceSegmentationModule, InstanceSegmentationDataModule
 
@@ -104,7 +108,7 @@ def optimise_clustering():
     best_parameters, best_values, experiment, model = ax.optimize(clustering_parameters,
                                                                   optimisation_function,
                                                                   minimize=False,
-                                                                  total_trials=100)
+                                                                  total_trials=300)
     with open('results/clustering_optimisation.txt', 'w') as f:
         f.write(str(best_parameters))
         f.write('\n')
@@ -119,7 +123,9 @@ def optimisation_function(clustering_parameters):
     for i_cv in range(4):
         metrics = evaluate(root_path, run_name, i_cv, clustering)
         main_metric = metrics['val_synthetic_iou_separate_chromosomes/dataloader_idx_0'] * 0.5 + \
-                      metrics['val_real_iou_separate_chromosomes/dataloader_idx_2'] * 0.5
+                      metrics['val_real_iou_separate_chromosomes/dataloader_idx_2'] * 0.5 + \
+                      abs(metrics['val_synthetic_n_chromosomes_difference/dataloader_idx_0']) * 0.05 + \
+                      abs(metrics['val_real_n_chromosomes_difference/dataloader_idx_2']) * 0.05
         main_metric_average += main_metric
     main_metric_average /= 4
     return main_metric_average
@@ -163,136 +169,245 @@ def evaluate_all():
     all_metrics.to_csv('results/instance_segmentation_test_metrics.csv')
 
 
-# def save_images(root_path, run_name, n_images, i_cv=0):
-#     run_name_parts = run_name.split('_')
-#     separate_input_channels = run_name_parts[-1] == 'separate'
-#     smaller_network = run_name_parts[-2] == 'snet'
-#     representation = '_'.join(run_name_parts[:-2])
-#
-#     dirpath = os.path.join(root_path, run_name)
-#     data_module = InstanceSegmentationDataModule(i_cv, separate_input_channels)
-#     module = load_module(dirpath, i_cv)
-#
-#     data_module.setup()
-#
-#     dataloaders = data_module.test_dataloader()
-#     dataloader_synthetic_val = dataloaders[0]
-#     dataloader_synthetic_test = dataloaders[1]
-#     dataloader_real_val = dataloaders[2]
-#     dataloader_real_test = dataloaders[3]
-#
-#     iterator_synthetic_val = iter(dataloader_synthetic_val)
-#     iterator_synthetic_test = iter(dataloader_synthetic_test)
-#     iterator_real_val = iter(dataloader_real_val)
-#     iterator_real_test = iter(dataloader_real_test)
-#
-#     data_iterators = {
-#         'synthetic_val': iterator_synthetic_val,
-#         'synthetic_test': iterator_synthetic_test,
-#         'real_val': iterator_real_val,
-#         'real_test': iterator_real_test}
-#
-#     if not separate_input_channels:
-#         dataloader_original_val = dataloaders[4]
-#         dataloader_original_test = dataloaders[5]
-#         iterator_original_val = iter(dataloader_original_val)
-#         iterator_original_test = iter(dataloader_original_test)
-#         data_iterators['original_val'] = iterator_original_val
-#         data_iterators['original_test'] = iterator_original_test
-#
-#     for dataset_name, dataset_iterator in data_iterators.items():
-#         image_i = 0
-#         while image_i < n_images:
-#             batch = next(dataset_iterator)
-#             if image_i >= n_images:
-#                 break
-#             if separate_input_channels:
-#                 batch_in = batch[:, 0:2, ...]
-#                 batch_label = batch[:, 2:, ...]
-#             else:
-#                 batch_in = batch[:, 0:1, ...]
-#                 batch_label = batch[:, 1:, ...]
-#             batch_prediction, all_separate_chromosomes = module(batch_in)
-#
-#             batch_in = batch_in.detach().cpu().numpy()
-#             batch_label = batch_label.detach().cpu().numpy()
-#             batch_prediction = batch_prediction.detach().cpu().numpy()
-#
-#             for image_in, image_label, image_prediction, prediction_separate_chromosomes in \
-#                     zip(batch_in, batch_label, batch_prediction, all_separate_chromosomes):
-#                 prediction_separate_chromosomes = prediction_separate_chromosomes.detach().cpu().numpy()
-#
-#                 prediction_category = np.argmax(image_prediction[0:3], axis=0)
-#                 prediction_angle = module.repr_2_angle()
-#                 if image_i >= n_images:
-#                     break
-#
-#                 # plot raw
-#                 plt.clf()
-#
-#                 plt.subplot(231)
-#                 plt.imshow(image_in[0], cmap='gray', vmin=0, vmax=1)
-#                 plt.axis('off')
-#
-#                 if separate_input_channels:
-#                     plt.subplot(234)
-#                     plt.imshow(image_in[1], cmap='gray', vmin=0, vmax=1)
-#                     plt.axis('off')
-#
-#                 if not separate_input_channels:
-#                     plt.subplot(232)
-#                     plt.imshow(image_label[0].astype(int), cmap='tab10', vmin=0, vmax=9)
-#                     plt.axis('off')
-#
-#                 plt.subplot(233)
-#                 plt.imshow(prediction_category, cmap='tab10', vmin=0, vmax=9)
-#                 plt.axis('off')
-#
-#                 if not separate_input_channels:
-#                     plt.subplot(235)
-#                     plt.
-#
-#                 plt.savefig(os.path.join(root_path, run_name,f"{dataset_name}_cv{cross_validation}_{image_i:03}.png"),
-#                             bbox_inches='tight',
-#                             dpi=200)
-#
-#                 image_i += 1
+def visualise(root_path, run_name, n_images, i_cv=0):
+    with torch.no_grad():
+        run_name_parts = run_name.split('_')
+        separate_input_channels = run_name_parts[-1] == 'separate'
+
+        dirpath = os.path.join(root_path, run_name)
+        data_module = InstanceSegmentationDataModule(i_cv, separate_input_channels)
+        data_module.num_workers = 2
+        module = load_module(dirpath, i_cv)
+
+        data_module.setup()
+
+        dataloaders = data_module.test_dataloader()
+        dataloader_synthetic_val = dataloaders[0]
+        dataloader_synthetic_test = dataloaders[1]
+        dataloader_real_val = dataloaders[2]
+        dataloader_real_test = dataloaders[3]
+
+        iterator_synthetic_val = iter(dataloader_synthetic_val)
+        iterator_synthetic_test = iter(dataloader_synthetic_test)
+        iterator_real_val = iter(dataloader_real_val)
+        iterator_real_test = iter(dataloader_real_test)
+
+        data_iterators = {
+            'synthetic_val': iterator_synthetic_val,
+            'synthetic_test': iterator_synthetic_test,
+            'real_val': iterator_real_val,
+            'real_test': iterator_real_test}
+
+        if not separate_input_channels:
+            dataloader_original_val = dataloaders[4]
+            dataloader_original_test = dataloaders[5]
+            iterator_original_val = iter(dataloader_original_val)
+            iterator_original_test = iter(dataloader_original_test)
+            data_iterators['original_val'] = iterator_original_val
+            data_iterators['original_test'] = iterator_original_test
+
+        for dataset_name, dataset_iterator in data_iterators.items():
+            image_i = 0
+            while image_i < n_images:
+                try:
+                    batch = next(dataset_iterator)
+                except StopIteration:
+                    break
+                if separate_input_channels:
+                    batch_in = batch[:, 0:2, ...]
+                    batch_label = batch[:, 2:, ...]
+                else:
+                    batch_in = batch[:, 0:1, ...]
+                    batch_label = batch[:, 1:, ...]
+                batch_prediction, all_separate_chromosomes = module(batch_in)
+
+                batch_prediction_category = torch.argmax(batch_prediction[:, 0:3, ...], dim=1, keepdim=True)
+                batch_prediction_dilated_intersection = (batch_prediction[:, 3:4, ...] > 0).type(module.dtype)
+                batch_prediction_angle = module.repr_2_angle(batch_prediction[:, 4:, ...])
+
+                for batch_elem_i in range(batch.shape[0]):
+                    if image_i >= n_images:
+                        break
+                    if 'synthetic' in dataset_name:
+                        label_category = batch_label[batch_elem_i, 0:1, ...].long()
+                        label_dilated_intersection = batch_label[batch_elem_i, 1:2, ...]
+                        label_angle = batch_label[batch_elem_i, 2:3, ...]
+                        label_chromosomes = batch_label[batch_elem_i, 3:5, ...]
+                        save_visualisation_raw(
+                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                            batch_in[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_category[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_dilated_intersection[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_angle[batch_elem_i, :, ...].cpu().numpy(),
+                            label_category.cpu().numpy(),
+                            label_dilated_intersection.cpu().numpy(),
+                            label_angle.cpu().numpy()
+                        )
+                        save_visualisation_chromosomes(
+                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                            batch_in[batch_elem_i, :, ...].cpu().numpy(),
+                            all_separate_chromosomes[batch_elem_i],
+                            label_chromosomes.cpu().numpy()
+                        )
+
+                    if 'real' in dataset_name:
+                        label_chromosomes = batch_label[batch_elem_i, :, ...]
+                        save_visualisation_raw(
+                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                            batch_in[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_category[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_dilated_intersection[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_angle[batch_elem_i, :, ...].cpu().numpy(),
+                            None,
+                            None,
+                            None
+                        )
+                        save_visualisation_chromosomes(
+                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                            batch_in[batch_elem_i, :, ...].cpu().numpy(),
+                            all_separate_chromosomes[batch_elem_i],
+                            label_chromosomes.cpu().numpy()
+                        )
+
+                    if 'original' in dataset_name:
+                        label_category = batch_label[batch_elem_i, 0:1, ...].long()
+                        label_chromosomes = torch.cat([
+                            torch.logical_or(torch.eq(label_category, 1), torch.eq(label_category, 3)),
+                            torch.logical_or(torch.eq(label_category, 2), torch.eq(label_category, 3))
+                        ])
+                        save_visualisation_raw(
+                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                            batch_in[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_category[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_dilated_intersection[batch_elem_i, :, ...].cpu().numpy(),
+                            batch_prediction_angle[batch_elem_i, :, ...].cpu().numpy(),
+                            None,
+                            None,
+                            None
+                        )
+                        save_visualisation_chromosomes(
+                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                            batch_in[batch_elem_i, :, ...].cpu().numpy(),
+                            all_separate_chromosomes[batch_elem_i],
+                            label_chromosomes.cpu().numpy()
+                        )
+
+                    image_i += 1
 
 
-# def save_all_images(n_images):
-#     root_path = 'results/instance_segmentation'
-#     run_names = os.listdir(root_path)
-#     for run_name in run_names:
-#         if os.path.isdir(os.path.join(root_path, run_name)):
-#             save_images(root_path, run_name, n_images, 0)
+def save_visualisation_raw(filename,
+                           in_image: np.ndarray,
+                           prediction_category: np.ndarray,
+                           prediction_dilated_intersection: np.ndarray,
+                           prediction_angle: np.ndarray,
+                           label_category: Optional[np.ndarray],
+                           label_dilated_intersection: Optional[np.ndarray],
+                           label_angle: Optional[np.ndarray]):
+
+    padding = 2
+
+    if any((label_category is None, label_dilated_intersection is None, label_angle is None)):
+        n_rows = 1
+    else:
+        n_rows = 2
+    n_columns = 4
+
+    row_size = in_image.shape[1]
+    col_size = in_image.shape[2]
+    whole_row_size = row_size * n_rows + padding * (n_rows - 1)
+    whole_col_size = col_size * n_columns + padding * (n_columns - 1)
+
+    whole_image = np.ones((whole_row_size, whole_col_size, 3))
+
+    def grid_slice(ir, ic):
+        return slice((row_size+padding)*ir, row_size*(ir+1) + padding*ir),\
+               slice((col_size+padding)*ic, col_size*(ic+1) + padding*ic),\
+               slice(None)
+
+    whole_image[grid_slice(0, 0)] = np.clip(np.mean(in_image, axis=0), 0, 1)[:, :, None]
+
+    whole_image[grid_slice(0, 1)] = plt.get_cmap('tab10')(prediction_category[0])[:, :, 0:3]
+
+    whole_image[grid_slice(0, 2)] = prediction_dilated_intersection[0, :, :, None] > 0
+
+    prediction_rgb = angle_pi_to_rgb(prediction_angle[0])
+    prediction_rgb *= prediction_category[0, :, :, None] == 1
+    whole_image[grid_slice(0, 3)] = prediction_rgb
+
+    if n_rows == 2:
+        whole_image[grid_slice(1, 1)] = plt.get_cmap('tab10')(label_category[0])[:, :, 0:3]
+
+        whole_image[grid_slice(1, 2)] = label_dilated_intersection[0, :, :, None] > 0
+
+        label_rgb = angle_pi_to_rgb(label_angle[0])
+        label_rgb *= label_category[0, :, :, None] == 1
+        whole_image[grid_slice(1, 3)] = label_rgb
+
+    plt.clf()
+    plt.imshow(whole_image)
+    plt.axis('off')
+    plt.savefig(filename, bbox_inches='tight', dpi=200)
+
+
+def save_visualisation_chromosomes(filename,
+                                   in_image,
+                                   prediction_chromosomes,
+                                   label_chromosomes):
+    padding = 2
+
+    n_rows = 2
+    n_columns = max(prediction_chromosomes.shape[0], label_chromosomes.shape[0]) + 1
+
+    row_size = in_image.shape[1]
+    col_size = in_image.shape[2]
+    whole_row_size = row_size * n_rows + padding * (n_rows - 1)
+    whole_col_size = col_size * n_columns + padding * (n_columns - 1)
+
+    whole_image = np.ones((whole_row_size, whole_col_size, 3))
+
+    def grid_slice(ir, ic):
+        return slice((row_size + padding) * ir, row_size * (ir + 1) + padding * ir), \
+               slice((col_size + padding) * ic, col_size * (ic + 1) + padding * ic), \
+               slice(None)
+
+    whole_image[grid_slice(0, 0)] = np.clip(np.mean(in_image, axis=0), 0, 1)[:, :, None]
+
+    for i_prediction_chromosome in range(prediction_chromosomes.shape[0]):
+        whole_image[grid_slice(0, i_prediction_chromosome + 1)] = \
+            prediction_chromosomes[i_prediction_chromosome, :, :, None] > 0
+
+    for i_label_chromosome in range(label_chromosomes.shape[0]):
+        whole_image[grid_slice(1, i_label_chromosome + 1)] = \
+            label_chromosomes[i_label_chromosome, :, :, None] > 0
+
+    plt.clf()
+    plt.imshow(whole_image)
+    plt.axis('off')
+    plt.savefig(filename, bbox_inches='tight', dpi=200)
+
+
+def angle_pi_to_rgb(angle: np.ndarray) -> np.ndarray:
+    """
+    Takes an np image with angles mod pi and creates an rgb visualisation.
+    Args:
+        param angle: 2D np array with angle values mod pi
+    Returns: rgb image, channel last
+    """
+    angle = np.remainder(angle, pi)/pi  # normalise to [0, 1)
+    rgb = hsv_to_rgb(np.stack([angle, np.ones_like(angle), np.ones_like(angle)], axis=2))
+    return rgb
+
+
+def visualise_all(n_images):
+    root_path = 'results/instance_segmentation'
+    run_names = os.listdir(root_path)
+    for run_name in run_names:
+        print(run_name)
+        if os.path.isdir(os.path.join(root_path, run_name)):
+            visualise(root_path, run_name, n_images, 0)
 
 
 if __name__ == '__main__':
     # evaluate_all()
     optimise_clustering()
-
-    # clustering_parameters = {
-    #     'minimum_dilated_intersection_area': 28,
-    #     'max_distance': 7,
-    #     'merge_peaks_distance': 2,
-    #     'minimum_clusters_area': 10,
-    #     'minimum_adjacent_area': 20,
-    #     'direction_sensitivity': 0.43871344895396364,
-    #     'cluster_grow_radius': 1.0,
-    #     'max_chromosome_width': 27,
-    #     'intersection_grow_radius': 1.2193580337740715,
-    #     'direction_local_weight': 0.9175349822623694}
-    #
-    # clustering = Clustering(max_chromosome_width=10, direction_sensitivity=0.87, minimum_clusters_area=10,
-    #                         merge_peaks_distance=1, max_distance=4, minimum_adjacent_area=8)
-    # root_path = 'results/instance_segmentation'
-    # run_name = 'da_vector_lnet_separate'
-    # main_metric_average = 0
-    # for i_cv in range(4):
-    #     metrics = evaluate(root_path, run_name, i_cv, clustering)
-    #     main_metric = metrics['val_synthetic_iou_separate_chromosomes/dataloader_idx_0'] * 0.5 + \
-    #                   metrics['val_real_iou_separate_chromosomes/dataloader_idx_2'] * 0.5
-    #     main_metric_average += main_metric
-    # main_metric_average /= 4
-    #
-    # print(main_metric_average)
+    # visualise_all(10)
