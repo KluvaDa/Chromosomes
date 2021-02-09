@@ -37,6 +37,9 @@ def load_module(dirpath: str, cross_validation: int):
 
 
 def optimise_clustering():
+    """
+    Performs an optimisation of the clustering parameters and saves the results in 'results/clustering_optimisation.txt
+    """
     clustering_parameters = [
         {
             'name': 'minimum_dilated_intersection_area',
@@ -116,6 +119,7 @@ def optimise_clustering():
 
 
 def optimisation_function(clustering_parameters):
+    """ Takes the parameters for clustering and returns an overall metric by validating on da_vector_lnet_separate"""
     root_path = 'results/instance_segmentation'
     run_name = 'da_vector_lnet_separate'
     clustering = Clustering(**clustering_parameters)
@@ -132,7 +136,14 @@ def optimisation_function(clustering_parameters):
     return main_metric_average
 
 
-def evaluate(root_path:str, run_name: str, i_cv: int, clustering=None):
+def evaluate(root_path: str, run_name: str, i_cv: int, clustering=None):
+    """
+    Runs validation and testing and returns the metrics dictionary
+    :param root_path: Path to where the runs are saved
+    :param run_name: Name of the run
+    :param i_cv: The cross validation run in (0, 1, 2, 3) to evaluate
+    :param clustering: a clustering object that overrides the default clustering parameters
+    """
     run_name_parts = run_name.split('_')
     separate_input_channels = run_name_parts[-1] == 'separate'
 
@@ -149,6 +160,11 @@ def evaluate(root_path:str, run_name: str, i_cv: int, clustering=None):
 
 
 def evaluate_average_cv(root_path: str, run_name: str):
+    """
+    Finds the metrics averaged over the cross-validation runs
+    :param root_path: Path to where the runs are saved
+    :param run_name: Name of the run
+    """
     all_cv_metrics = []
     for i_cv in (0, 1, 2, 3):
         test_metrics = evaluate(root_path, run_name, i_cv)
@@ -159,6 +175,9 @@ def evaluate_average_cv(root_path: str, run_name: str):
 
 
 def evaluate_all():
+    """
+    Evaluates all runs and saves the results as as csv file in results/instance_segmentation_test_metrics.csv
+    """
     root_path = 'results/instance_segmentation'
     run_names = os.listdir(root_path)
     all_metrics = dict()
@@ -171,6 +190,13 @@ def evaluate_all():
 
 
 def visualise(root_path, run_name, n_images, i_cv=0):
+    """
+    Saves images of the test and validation in the root_path/run_name directory
+    :param root_path: Path to where the runs are saved
+    :param run_name: Name of the run
+    :param n_images: How many images to save from each dataset
+    :param i_cv: Which cross_validation run to use
+    """
     with torch.no_grad():
         run_name_parts = run_name.split('_')
         separate_input_channels = run_name_parts[-1] == 'separate'
@@ -234,8 +260,7 @@ def visualise(root_path, run_name, n_images, i_cv=0):
                         label_dilated_intersection = batch_label[batch_elem_i, 1:2, ...]
                         label_angle = batch_label[batch_elem_i, 2:3, ...]
                         label_chromosomes = batch_label[batch_elem_i, 3:5, ...]
-                        save_visualisation_raw(
-                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                        whole_image = return_visualisation_raw(
                             batch_in[batch_elem_i, :, ...].cpu().numpy(),
                             batch_prediction_category[batch_elem_i, :, ...].cpu().numpy(),
                             batch_prediction_dilated_intersection[batch_elem_i, :, ...].cpu().numpy(),
@@ -244,17 +269,28 @@ def visualise(root_path, run_name, n_images, i_cv=0):
                             label_dilated_intersection.cpu().numpy(),
                             label_angle.cpu().numpy()
                         )
-                        save_visualisation_chromosomes(
-                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                        plt.clf()
+                        plt.imshow(whole_image)
+                        plt.axis('off')
+                        plt.savefig(os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                                    bbox_inches='tight',
+                                    dpi=200)
+                        
+                        whole_image = return_visualisation_chromosomes(
                             batch_in[batch_elem_i, :, ...].cpu().numpy(),
                             all_separate_chromosomes[batch_elem_i],
                             label_chromosomes.cpu().numpy()
                         )
+                        plt.clf()
+                        plt.imshow(whole_image)
+                        plt.axis('off')
+                        plt.savefig(os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                                    bbox_inches='tight',
+                                    dpi=200)
 
                     if 'real' in dataset_name:
                         label_chromosomes = batch_label[batch_elem_i, :, ...]
-                        save_visualisation_raw(
-                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                        whole_image = return_visualisation_raw(
                             batch_in[batch_elem_i, :, ...].cpu().numpy(),
                             batch_prediction_category[batch_elem_i, :, ...].cpu().numpy(),
                             batch_prediction_dilated_intersection[batch_elem_i, :, ...].cpu().numpy(),
@@ -263,12 +299,23 @@ def visualise(root_path, run_name, n_images, i_cv=0):
                             None,
                             None
                         )
-                        save_visualisation_chromosomes(
-                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                        plt.clf()
+                        plt.imshow(whole_image)
+                        plt.axis('off')
+                        plt.savefig(os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                                    bbox_inches='tight',
+                                    dpi=200)
+                        whole_image = return_visualisation_chromosomes(
                             batch_in[batch_elem_i, :, ...].cpu().numpy(),
                             all_separate_chromosomes[batch_elem_i],
                             label_chromosomes.cpu().numpy()
                         )
+                        plt.clf()
+                        plt.imshow(whole_image)
+                        plt.axis('off')
+                        plt.savefig(os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                                    bbox_inches='tight',
+                                    dpi=200)
 
                     if 'original' in dataset_name:
                         label_category = batch_label[batch_elem_i, 0:1, ...].long()
@@ -276,8 +323,7 @@ def visualise(root_path, run_name, n_images, i_cv=0):
                             torch.logical_or(torch.eq(label_category, 1), torch.eq(label_category, 3)),
                             torch.logical_or(torch.eq(label_category, 2), torch.eq(label_category, 3))
                         ])
-                        save_visualisation_raw(
-                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                        whole_image = return_visualisation_raw(
                             batch_in[batch_elem_i, :, ...].cpu().numpy(),
                             batch_prediction_category[batch_elem_i, :, ...].cpu().numpy(),
                             batch_prediction_dilated_intersection[batch_elem_i, :, ...].cpu().numpy(),
@@ -286,25 +332,34 @@ def visualise(root_path, run_name, n_images, i_cv=0):
                             None,
                             None
                         )
-                        save_visualisation_chromosomes(
-                            os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                        plt.clf()
+                        plt.imshow(whole_image)
+                        plt.axis('off')
+                        plt.savefig(os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}_raw.png"),
+                                    bbox_inches='tight',
+                                    dpi=200)
+                        whole_image = return_visualisation_chromosomes(
                             batch_in[batch_elem_i, :, ...].cpu().numpy(),
                             all_separate_chromosomes[batch_elem_i],
                             label_chromosomes.cpu().numpy()
                         )
+                        plt.clf()
+                        plt.imshow(whole_image)
+                        plt.axis('off')
+                        plt.savefig(os.path.join(root_path, run_name, f"{dataset_name}_cv{i_cv}_{image_i:03}.png"),
+                                    bbox_inches='tight',
+                                    dpi=200)
 
                     image_i += 1
 
 
-def save_visualisation_raw(filename,
-                           in_image: np.ndarray,
-                           prediction_category: np.ndarray,
-                           prediction_dilated_intersection: np.ndarray,
-                           prediction_angle: np.ndarray,
-                           label_category: Optional[np.ndarray],
-                           label_dilated_intersection: Optional[np.ndarray],
-                           label_angle: Optional[np.ndarray]):
-
+def return_visualisation_raw(in_image: np.ndarray,
+                             prediction_category: np.ndarray,
+                             prediction_dilated_intersection: np.ndarray,
+                             prediction_angle: np.ndarray,
+                             label_category: Optional[np.ndarray],
+                             label_dilated_intersection: Optional[np.ndarray],
+                             label_angle: Optional[np.ndarray]):
     padding = 2
 
     if any((label_category is None, label_dilated_intersection is None, label_angle is None)):
@@ -343,17 +398,13 @@ def save_visualisation_raw(filename,
         label_rgb = angle_pi_to_rgb(label_angle[0])
         label_rgb *= label_category[0, :, :, None] == 1
         whole_image[grid_slice(1, 3)] = label_rgb
-
-    plt.clf()
-    plt.imshow(whole_image)
-    plt.axis('off')
-    plt.savefig(filename, bbox_inches='tight', dpi=200)
+        
+    return whole_image
 
 
-def save_visualisation_chromosomes(filename,
-                                   in_image,
-                                   prediction_chromosomes,
-                                   label_chromosomes):
+def return_visualisation_chromosomes(in_image,
+                                     prediction_chromosomes,
+                                     label_chromosomes):
     padding = 2
 
     n_rows = 2
@@ -380,11 +431,7 @@ def save_visualisation_chromosomes(filename,
     for i_label_chromosome in range(label_chromosomes.shape[0]):
         whole_image[grid_slice(1, i_label_chromosome + 1)] = \
             label_chromosomes[i_label_chromosome, :, :, None] > 0
-
-    plt.clf()
-    plt.imshow(whole_image)
-    plt.axis('off')
-    plt.savefig(filename, bbox_inches='tight', dpi=200)
+    return whole_image
 
 
 def angle_pi_to_rgb(angle: np.ndarray) -> np.ndarray:
@@ -410,5 +457,5 @@ def visualise_all(n_images):
 
 if __name__ == '__main__':
     # evaluate_all()
-    optimise_clustering()
-    # visualise_all(10)
+    # optimise_clustering()
+    visualise_all(10)

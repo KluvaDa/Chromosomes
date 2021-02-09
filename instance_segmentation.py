@@ -340,7 +340,7 @@ class InstanceSegmentationModule(pl.LightningModule):
         batch_prediction = self.net(x)
         batch_prediction_3category = torch.argmax(batch_prediction[:, 0:3, ...], dim=1, keepdim=True).detach()
         batch_prediction_dilated_intersection = (batch_prediction[:, 3:4, ...] > 0).type(self.dtype).detach()
-        batch_prediction_direction_angle = self.angle_2_repr(batch_prediction[:, 4:, ...]).detach()
+        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction[:, 4:, ...]).detach()
 
         all_separate_chromosomes = []
         for prediction_3_category, prediction_dilated_intersection, prediction_direction_angle in \
