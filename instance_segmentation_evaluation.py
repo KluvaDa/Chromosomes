@@ -108,7 +108,7 @@ def optimise_clustering():
     best_parameters, best_values, experiment, model = ax.optimize(clustering_parameters,
                                                                   optimisation_function,
                                                                   minimize=False,
-                                                                  total_trials=300)
+                                                                  total_trials=100)
     with open('results/clustering_optimisation.txt', 'w') as f:
         f.write(str(best_parameters))
         f.write('\n')
@@ -122,10 +122,11 @@ def optimisation_function(clustering_parameters):
     main_metric_average = 0
     for i_cv in range(4):
         metrics = evaluate(root_path, run_name, i_cv, clustering)
-        main_metric = metrics['val_synthetic_iou_separate_chromosomes/dataloader_idx_0'] * 0.5 + \
-                      metrics['val_real_iou_separate_chromosomes/dataloader_idx_2'] * 0.5 + \
-                      abs(metrics['val_synthetic_n_chromosomes_difference/dataloader_idx_0']) * 0.05 + \
-                      abs(metrics['val_real_n_chromosomes_difference/dataloader_idx_2']) * 0.05
+        main_metric = \
+            metrics['val_synthetic_iou_separate_chromosomes/dataloader_idx_0'] * 0.5 \
+            + metrics['val_real_iou_separate_chromosomes/dataloader_idx_2'] * 0.5 \
+            - abs(metrics['val_synthetic_n_chromosomes_difference/dataloader_idx_0']) * 0.05 \
+            - abs(metrics['val_real_n_chromosomes_difference/dataloader_idx_2']) * 0.05
         main_metric_average += main_metric
     main_metric_average /= 4
     return main_metric_average
