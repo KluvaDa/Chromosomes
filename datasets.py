@@ -226,6 +226,9 @@ class SyntheticChromosomeDataset(IterableDataset):
                                   'skeleton' - the centreline of chromosome 0 and chromosome 1
                                   'skeleton_ch_0' - the centreline of chromosome 0
                                   'skeleton_ch_1' - the centreline of chromosome 0
+                                  'boundary_ch_0' - the boundary around chromosome 0
+                                  'boundary_ch_1' - the boundary around chromosome 1
+                                  'boundary' - the boundary around both chromosomes
                                   'direction' - the direction of the chromosome as an angle in range [0, pi],
                                                 valid in unique areas, 0 where undefined
                                   'direction_ch_0' - the direction of chromosome 0 as an angle in range [0, pi],
@@ -325,7 +328,8 @@ class SyntheticChromosomeDataset(IterableDataset):
         ch_1_seg_dilated = None
         output_channel_set = set(self.output_channels_list)
         if bool({'intersection_dilated', 'union_dilated', 'unique_dilated',
-                 'background_dilated', 'ch_0_dilated', 'ch_1_dilated'} & output_channel_set):
+                 'background_dilated', 'ch_0_dilated', 'ch_1_dilated',
+                 'boundary_ch_0', 'boundary_ch_1', 'boundary'} & output_channel_set):
             ch_0_seg_dilated = skimage.morphology.binary_dilation(ch_0[3], selem=np.ones((5, 5)))
             ch_1_seg_dilated = skimage.morphology.binary_dilation(ch_1[3], selem=np.ones((5, 5)))
 
@@ -375,6 +379,17 @@ class SyntheticChromosomeDataset(IterableDataset):
                 output.append(ch_0[2].astype(self.dtype))
             elif output_channel == 'skeleton_ch_1':
                 output.append(ch_1[2].astype(self.dtype))
+            elif output_channel == 'boundary_ch_0':
+                boundary_ch_0 = np.logical_and(ch_0_seg_dilated, np.logical_not(ch_0[3]))
+                output.append(boundary_ch_0.astype(self.dtype))
+            elif output_channel == 'boundary_ch_1':
+                boundary_ch_1 = np.logical_and(ch_1_seg_dilated, np.logical_not(ch_1[3]))
+                output.append(boundary_ch_1.astype(self.dtype))
+            elif output_channel == 'boundary':
+                boundary_ch_0 = np.logical_and(ch_0_seg_dilated, np.logical_not(ch_0[3]))
+                boundary_ch_1 = np.logical_and(ch_1_seg_dilated, np.logical_not(ch_1[3]))
+                boundary = np.logical_or(boundary_ch_0, boundary_ch_1)
+                output.append(boundary.astype(self.dtype))
             elif output_channel == 'direction':
                 direction = ch_0[4] * ch_0[3] + ch_1[4] * ch_1[3]
                 direction *= np.logical_xor(ch_0[3], ch_1[3])
@@ -550,9 +565,9 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     datasets = [
-        OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
-        # SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
-        #                            ['dapi_cy3','3_channel'], 'length', True),
+        # OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
+        SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
+                                   ['dapi_cy3', 'boundary'], 'length', True),
         # RealOverlappingChromosomes('data', False, (0.2, 0.9), False, True, 3),
     ]
 

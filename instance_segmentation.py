@@ -60,7 +60,8 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
 
     def __init__(self,
                  cross_validation_i: int,
-                 separate_input_channels: bool = False
+                 separate_input_channels: bool = False,
+                 use_boundary: bool = False
                  ):
         """
         The data has the following channels:
@@ -72,10 +73,13 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
         [input, separate_chromosomes(2 or more)]
 
         :param cross_validation_i: An integer in [0, 4) specifying which cross-validation split to select.
+        :param separate_input_channels: Whether to use two channels as input (True) or average them out (False)
+        :param use_boundary: Whether to output the chromosome boundary (True) or the dilated intersection (False)
         """
         super().__init__()
         self.cross_validation_i = cross_validation_i
         self.separate_input_channels = separate_input_channels
+        self.use_boundary = use_boundary
 
         # Default params
         self.batchsize = 64
@@ -149,10 +153,16 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
         val_slides = val_slides_cv[self.cross_validation_i]
         test_slides = (12, 13, 14)
 
-        if self.separate_input_channels:
-            output_channels_list = ['dapi', 'cy3', '3_channel', 'intersection_dilated', 'direction', 'ch_0', 'ch_1']
+        if self.use_boundary:
+            if self.separate_input_channels:
+                output_channels_list = ['dapi', 'cy3', '3_channel', 'boundary', 'direction', 'ch_0', 'ch_1']
+            else:
+                output_channels_list = ['dapi_cy3', '3_channel', 'boundary', 'direction', 'ch_0', 'ch_1']
         else:
-            output_channels_list = ['dapi_cy3', '3_channel', 'intersection_dilated', 'direction', 'ch_0', 'ch_1']
+            if self.separate_input_channels:
+                output_channels_list = ['dapi', 'cy3', '3_channel', 'intersection_dilated', 'direction', 'ch_0', 'ch_1']
+            else:
+                output_channels_list = ['dapi_cy3', '3_channel', 'intersection_dilated', 'direction', 'ch_0', 'ch_1']
 
         self.dataset_synthetic_train = datasets.SyntheticChromosomeDataset(self.filepath_new_synthetic,
                                                                            self.imsize_synthetic,
@@ -283,20 +293,7 @@ class InstanceSegmentationModule(pl.LightningModule):
         self.repr_2_angle = rep_2d_pytorch.get_repr_2_angle(representation)
         self.angle_difference_function = rep_2d_losses.define_angular_loss_nored(pi)
 
-
-        clustering_parameters = {
-            'minimum_dilated_intersection_area': 28,
-            'max_distance': 7,
-            'merge_peaks_distance': 2,
-            'minimum_clusters_area': 10,
-            'minimum_adjacent_area': 20,
-            'direction_sensitivity': 0.43871344895396364,
-            'cluster_grow_radius': 1.0,
-            'max_chromosome_width': 27,
-            'intersection_grow_radius': 1.2193580337740715,
-            'direction_local_weight': 0.9175349822623694}
-
-        self.clustering = Clustering(**clustering_parameters)
+        self.clustering = Clustering()
 
         # hardcoded parameters
         if smaller_network:
@@ -613,7 +610,8 @@ class InstanceSegmentationModule(pl.LightningModule):
 def train(representation: str,
           smaller_network: bool,
           separate_input_channels: bool,
-          cross_validation_i: int,):
+          cross_validation_i: int,
+          use_boundary: bool = False):
 
     assert representation in ('angle',
                               'vector',
@@ -622,6 +620,10 @@ def train(representation: str,
                               'piecewise_adjusted_linear_choice',
                               'piecewise_adjusted_smooth_choice',
                               'piecewise_adjusted_sum')
+    if use_boundary:
+        root_path = 'results/instance_segmentation_boundary'
+    else:
+        root_path = 'results/instance_segmentation'
 
     name = f"{representation}" \
            f"_{'snet' if smaller_network else 'lnet'}" \
@@ -634,7 +636,7 @@ def train(representation: str,
     instance_segmentation_module = InstanceSegmentationModule(representation, smaller_network, separate_input_channels)
     instance_segmentation_data_module = InstanceSegmentationDataModule(cross_validation_i, separate_input_channels)
 
-    logger = pl_loggers.TensorBoardLogger('results/instance_segmentation', name=name, default_hp_metric=False)
+    logger = pl_loggers.TensorBoardLogger(root_path, name=name, default_hp_metric=False)
 
     main_metric = 'val_synthetic_main_metric'
     early_stopping_callback = pl.callbacks.EarlyStopping(main_metric,
@@ -649,7 +651,7 @@ def train(representation: str,
     trainer.fit(instance_segmentation_module, datamodule=instance_segmentation_data_module)
 
 
-def train_all():
+def train_all(use_boundary: bool = False):
     for smaller_network in (False, True):
         for separate_input_channels in (True, False):
             for representation in ('angle',
@@ -660,11 +662,11 @@ def train_all():
                                    'piecewise_adjusted_smooth_choice',
                                    'piecewise_adjusted_sum'):
                 for cross_validation_i in (0, 1, 2, 3):
-                    train(representation, smaller_network, separate_input_channels, cross_validation_i)
+                    train(representation, smaller_network, separate_input_channels, cross_validation_i, use_boundary)
 
 
 if __name__ == '__main__':
-    train_all()
+    train_all(True)
 
 
 
