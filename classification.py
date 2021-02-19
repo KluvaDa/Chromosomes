@@ -317,6 +317,7 @@ class ClassificationModule(pl.LightningModule):
         metrics = self._calculate_metrics(batch_prediction, batch_label, dataset_name)
 
         self.log_dict(metrics, on_epoch=True)
+        return metrics
 
     def test_step(self, batch, batch_step, dataloader_idx):
         batch_prediction, batch_label = self._step_core(batch)
@@ -330,6 +331,7 @@ class ClassificationModule(pl.LightningModule):
         metrics = self._calculate_metrics(batch_prediction, batch_label, dataset_name)
 
         self.log_dict(metrics, on_epoch=True)
+        return metrics
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters())
@@ -365,6 +367,18 @@ class ClassificationModule(pl.LightningModule):
             metrics[dataset_name+'_iou_ch0'] = torch.mean(iou_channels[1])
             metrics[dataset_name+'_iou_ch1'] = torch.mean(iou_channels[2])
             metrics[dataset_name+'_iou_overlap'] = torch.mean(iou_channels[3])
+
+            prediction_ch0_or_ch1 = torch.logical_or(
+                torch.eq(batch_prediction_class, 1),
+                torch.eq(batch_prediction_class, 2)
+            )
+            label_ch0_or_ch1 = torch.logical_or(
+                torch.eq(batch_label, 1),
+                torch.eq(batch_label, 2)
+            )
+            iou_ch0_or_ch1 = calculate_binary_iou_batch(prediction_ch0_or_ch1,
+                                                        label_ch0_or_ch1)
+            metrics[dataset_name+'_iou_ch0_or_ch1'] = torch.mean(iou_ch0_or_ch1)
         else:
             metrics[dataset_name+'_iou_ch'] = torch.mean(iou_channels[1])
             metrics[dataset_name+'_iou_overlap'] = torch.mean(iou_channels[2])
@@ -441,5 +455,18 @@ def train_all():
                 train(smaller_network, cross_validation_i, train_on_original, segment_4_categories, shuffle_first, category_order)
 
 
+def train_subset():
+    for train_on_original, category_order in (
+                (True, 'random'),
+                (False, 'random'),
+                (False, 'position'),
+                (False, 'orientation'),
+                (False, 'length'),
+                (False, 'random')):
+        for cross_validation_i in (0, 1, 2, 3):
+            train(False, cross_validation_i, train_on_original, True, False, category_order)
+
+
 if __name__ == '__main__':
-    train_all()
+    # train_all()
+    train_subset()

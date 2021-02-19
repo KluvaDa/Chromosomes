@@ -189,20 +189,21 @@ def evaluate_all():
     all_metrics.to_csv('results/instance_segmentation_test_metrics.csv')
 
 
-def visualise(root_path, run_name, n_images, i_cv=0):
+def visualise(root_path, run_name, n_images, i_cv=0, use_boundary=False):
     """
     Saves images of the test and validation in the root_path/run_name directory
     :param root_path: Path to where the runs are saved
     :param run_name: Name of the run
     :param n_images: How many images to save from each dataset
     :param i_cv: Which cross_validation run to use
+    :param use_boundary: Whether to use boundary version of clustering
     """
     with torch.no_grad():
         run_name_parts = run_name.split('_')
         separate_input_channels = run_name_parts[-1] == 'separate'
 
         dirpath = os.path.join(root_path, run_name)
-        data_module = InstanceSegmentationDataModule(i_cv, separate_input_channels)
+        data_module = InstanceSegmentationDataModule(i_cv, separate_input_channels, use_boundary=use_boundary)
         data_module.num_workers = 2
         module = load_module(dirpath, i_cv)
 
@@ -455,7 +456,21 @@ def visualise_all(n_images):
             visualise(root_path, run_name, n_images, 0)
 
 
+def visualise_all_boundary(n_images):
+    root_path = 'results/instance_segmentation_boundary'
+    run_names = os.listdir(root_path)
+    for run_name in run_names:
+        print(run_name)
+        if os.path.isdir(os.path.join(root_path, run_name)):
+            visualise(root_path, run_name, n_images, 0, use_boundary=True)
+
+
 if __name__ == '__main__':
     # evaluate_all()
     # optimise_clustering()
-    visualise_all(10)
+    # visualise_all(10)
+
+    root_path = 'results/instance_segmentation_boundary'
+    run_name = 'da_vector_lnet_averaged'
+    visualise(root_path, run_name, 10, 0, True)
+    # metrics = evaluate(root_path, run_name, 0)

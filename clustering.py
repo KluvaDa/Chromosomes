@@ -10,10 +10,22 @@ from typing import Sequence, Tuple, Union, Optional, List
 import representations.rep_2d_numpy
 
 
+class ClusteringWithBoundary:
+    """
+    Separates direction-style network output with boudnary instead of dilated_intersection into separate chromosomes.
+    Works on a single image (no batch)
+    The hyperparameters are saved in the __init__ function.
+    """
+    def __init__(self):
+        pass
+
+
+
+
 class Clustering:
     """
     Separates direction-style network output into separate chromosomes. Work on a single image (no batch).
-    The hyperparameters are saved in the __init__ funciton.
+    The hyperparameters are saved in the __init__ function.
     """
     def __init__(self,
                  minimum_dilated_intersection_area: int = 30,
@@ -525,3 +537,4 @@ def get_disk(radius: Union[int, float]) -> np.ndarray:
     y, x = np.ogrid[-radius_floor:radius_floor + 1, -radius_floor:radius_floor + 1]
     disk = x ** 2 + y ** 2 <= radius ** 2
     return disk
+

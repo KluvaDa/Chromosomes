@@ -5,7 +5,7 @@ import pathlib
 import numpy as np
 import pathlib
 import matplotlib.pyplot as plt
-import pandas
+import pandas as pd
 
 from tensorboard.backend.event_processing import event_accumulator
 from typing import Dict
@@ -47,6 +47,60 @@ def load_module(dirpath: str, cross_validation: int):
     return classification_module
 
 
+def evaluate(root_path: str, run_name: str, i_cv: int, clustering=None):
+    """
+    Runs validation and testing and returns the metrics dictionary
+    :param root_path: Path to where the runs are saved
+    :param run_name: Name of the run
+    :param i_cv: The cross validation run in (0, 1, 2, 3) to evaluate
+    :param clustering: a clustering object that overrides the default clustering parameters
+    """
+    train_on_original, segment_4_categories, smaller_network, shuffle_first, category_order = \
+        interpret_dirname(run_name)
+
+    dirpath = os.path.join(root_path, run_name)
+    data_module = classification.ClassificationDataModule(train_on_original=train_on_original,
+                                                          cross_validation_i=i_cv,
+                                                          segment_4_categories=segment_4_categories,
+                                                          shuffle_first=False,
+                                                          category_order=category_order)
+    module = load_module(dirpath, i_cv)
+    trainer = pl.Trainer(gpus=1)
+    test_metrics = trainer.test(module, datamodule=data_module)
+    test_metrics = pd.DataFrame(test_metrics)
+    test_metrics = test_metrics.mean()  # no repetition, should merely flatten
+    return test_metrics
+
+def evaluate_average_cv(root_path: str, run_name: str):
+    """
+    Finds the metrics averaged over the cross-validation runs
+    :param root_path: Path to where the runs are saved
+    :param run_name: Name of the run
+    """
+    all_cv_metrics = []
+    for i_cv in (0, 1, 2, 3):
+        test_metrics = evaluate(root_path, run_name, i_cv)
+        all_cv_metrics.append(test_metrics)
+    average_metrics = pd.concat(all_cv_metrics)
+    average_metrics = average_metrics.groupby(average_metrics.index).mean()
+    return average_metrics
+
+
+def evaluate_all():
+    """
+    Evaluates all runs and saves the results as as csv file in results/instance_segmentation_test_metrics.csv
+    """
+    root_path = 'results/classification_good'
+    run_names = os.listdir(root_path)
+    all_metrics = dict()
+    for run_name in run_names:
+        if os.path.isdir(os.path.join(root_path, run_name)):
+            metrics = evaluate_average_cv(root_path, run_name)
+            all_metrics[run_name] = metrics
+    all_metrics = pd.DataFrame(all_metrics)
+    all_metrics.to_csv('results/classification_test_metrics.csv')
+
+
 def load_tensorboard(root_path: str):
     run_names = os.listdir(root_path)
     all_metrics = dict()
@@ -78,7 +132,7 @@ def scalars_averaged_over_epochs(scalars, metric_names):
     max_epoch = int(np.max(scalars['epoch'][1]))
     step_epochs = dict(zip(scalars['epoch'][0], scalars['epoch'][1]))
 
-    metrics = pandas.DataFrame(0, index=range(max_epoch + 1), columns=metric_names)
+    metrics = pd.DataFrame(0, index=range(max_epoch + 1), columns=metric_names)
     for metric_name in metric_names:
         metric_steps = scalars[metric_name][0]
         metric_epoch = np.array([int(step_epochs[metric_step]) for metric_step in metric_steps])
@@ -98,7 +152,7 @@ def save_metrics_as_csv():
     """
     root_path = 'results/classification'
     all_metrics = load_tensorboard(root_path)
-    dataframe = pandas.DataFrame(all_metrics).transpose()
+    dataframe = pd.DataFrame(all_metrics).transpose()
     dataframe.to_csv('results/classification_metrics.csv')
 
 
@@ -109,7 +163,7 @@ def graph_metrics(root_path, run_name, metric_names):
         scalars = {name.split('/')[0]: value for name, value in scalars.items()}
         epoch_metrics = scalars_averaged_over_epochs(scalars, metric_names)
         epoch_metrics_list.append(epoch_metrics)
-    epoch_metrics = pandas.concat(epoch_metrics_list)
+    epoch_metrics = pd.concat(epoch_metrics_list)
     epoch_metrics = epoch_metrics.groupby(epoch_metrics.index).mean()
     epoch_metrics.plot(color=['#3182bd', '#6baed6', '#9ecae1', '#c6dbef',
                               '#e6550d', '#fd8d3c', '#fdae6b', '#fdd0a2',
@@ -164,7 +218,7 @@ def save_images(root_path, run_name, n_images, cross_validation=0):
                 plt.imshow(image_prediction[0], cmap='tab10', vmin=0, vmax=9)
                 plt.axis('off')
 
-                plt.savefig(os.path.join(root_path, run_name,f"{dataset_name}_cv{cross_validation}_{image_i:03}.png"),
+                plt.savefig(os.path.join(root_path, run_name, f"{dataset_name}_cv{cross_validation}_{image_i:03}.png"),
                             bbox_inches='tight',
                             dpi=200)
 
@@ -182,7 +236,9 @@ def save_all_images(n_images):
 if __name__ == '__main__':
     # save_metrics_as_csv()
 
-    save_all_images(10)
+    evaluate_all()
+
+    # save_all_images(10)
 
     # root_path = 'results/classification_old'
     #
@@ -212,7 +268,7 @@ if __name__ == '__main__':
     #
     #
     # all_metrics = load_tensorboard(root_path)
-    # df = pandas.DataFrame(all_metrics).transpose()
+    # df = pd.DataFrame(all_metrics).transpose()
     #
     # original_metric_names = ['val_original_iou_background',
     #                          'val_original_iou_ch0_best_match',
@@ -246,7 +302,7 @@ if __name__ == '__main__':
     #     synthetic = df.loc[run_name, synthetic_metric_names].to_numpy()
     #     real = df.loc[run_name, real_metric_names].to_numpy()
     #     data = np.stack([original, synthetic, real])
-    #     visualisation_df = pandas.DataFrame(data,
+    #     visualisation_df = pd.DataFrame(data,
     #                                         index=['original', 'synthetic', 'real'],
     #                                         columns=['background', 'chromosome 0', 'chromosome 1', 'overlap'])
     #     visualisation_df.plot.bar(rot=0).legend(loc='center left', bbox_to_anchor=(1, 0.5))

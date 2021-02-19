@@ -20,7 +20,7 @@ import networks
 import datasets
 from representations import rep_2d_losses, rep_2d_pytorch
 from classification import calculate_binary_iou_batch
-from clustering import Clustering
+from clustering import Clustering, ClusteringWithBoundary
 
 
 def calculate_iou_separate_chromosomes(prediction_chromosomes,
@@ -258,7 +258,8 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
 
 
 class InstanceSegmentationModule(pl.LightningModule):
-    def __init__(self, representation: str, smaller_network: bool, separate_input_channels: bool = False):
+    def __init__(self, representation: str, smaller_network: bool, separate_input_channels: bool = False,
+                 use_boundary: bool = False):
         """
         Module with hard coded parameters for everything.
         :param representation: Which direction representation to use. One of the following:
@@ -270,12 +271,15 @@ class InstanceSegmentationModule(pl.LightningModule):
             'piecewise_adjusted_smooth_choice',
             'piecewise_adjusted_sum')
         :param smaller_network: Whether to use the smaller network (Hu et al) or larger (Saleh et al)
+        :param separate_input_channels: Whether to use two channels as input (True) or average them out (False)
+        :param use_boundary: Whether to output the chromosome boundary (True) or the dilated intersection (False)
         """
         super().__init__()
         self.save_hyperparameters()
 
         self.representation = representation
         self.separate_input_channels = separate_input_channels
+        self.use_boundary = use_boundary
         n_channels_in = 2 if separate_input_channels else 1
 
         if representation == 'angle':
@@ -293,7 +297,10 @@ class InstanceSegmentationModule(pl.LightningModule):
         self.repr_2_angle = rep_2d_pytorch.get_repr_2_angle(representation)
         self.angle_difference_function = rep_2d_losses.define_angular_loss_nored(pi)
 
-        self.clustering = Clustering()
+        if use_boundary:
+            self.clustering = ClusteringWithBoundary()
+        else:
+            self.clustering = Clustering()
 
         # hardcoded parameters
         if smaller_network:
@@ -634,7 +641,8 @@ def train(representation: str,
     early_stopping_patience = 8
 
     instance_segmentation_module = InstanceSegmentationModule(representation, smaller_network, separate_input_channels)
-    instance_segmentation_data_module = InstanceSegmentationDataModule(cross_validation_i, separate_input_channels)
+    instance_segmentation_data_module = InstanceSegmentationDataModule(cross_validation_i, separate_input_channels,
+                                                                       use_boundary=use_boundary)
 
     logger = pl_loggers.TensorBoardLogger(root_path, name=name, default_hp_metric=False)
 
@@ -666,8 +674,8 @@ def train_all(use_boundary: bool = False):
 
 
 if __name__ == '__main__':
-    train_all(True)
-
+    # train_all(True)
+    train('da_vector', False, False, 0, True)
 
 
 
