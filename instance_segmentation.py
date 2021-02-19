@@ -18,14 +18,50 @@ from torch.utils.data import DataLoader
 
 import networks
 import datasets
-from representations import rep_2d_losses, rep_2d_pytorch
-from classification import calculate_binary_iou_batch
+from semantic_segmentation import calculate_binary_iou_batch
 from clustering import Clustering, ClusteringWithBoundary
+
+
+def angle_2_da_vector(angles: torch.Tensor) -> torch.Tensor:
+    """
+    Angles in radians to double-angle vector space; 0 radians -> (1, 0), pi/4 radians -> (0, 1)
+    Args:
+        angles: torch.Tenor of shape (batch, 1, x, y)
+    Returns: torch tensor of shape (batch, 2, x, y)
+    """
+    double_angle = angles*2
+    da_vectors_x = torch.cos(double_angle)
+    da_vectors_y = torch.sin(double_angle)
+    da_vectors = torch.cat([da_vectors_x, da_vectors_y], dim=1)
+    return da_vectors
+
+
+def da_vector_2_angle(vectors: torch.Tensor) -> torch.Tensor:
+    """
+    Double-angle vector space to angles in radians in range [0, pi); (1, 0) -> 0 radians, (0, 1) -> pi/4 radians
+    Args:
+        vectors: torch.Tensor of shape (batch, 2, x, y)
+    Returns: torch.Tensor of shape (batch, 1, x, y)
+    """
+    double_angle = torch.atan2(vectors[:, 1:2, ...], vectors[:, 0:1, ...])
+    double_angle = torch.remainder(double_angle, 2*pi)
+    angle = double_angle / 2
+    return angle
+
+
+def angular_distance(prediction: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
+    """
+    Calculates the angular distance between angles modulo pi (finding the smaller angle), maintaining tensor dimensions
+    """
+    prediction = torch.remainder(prediction, pi)
+    label = torch.remainder(label, pi)
+    return - torch.abs(torch.abs(prediction-label) - (pi/2)) + (pi/2)
 
 
 def calculate_iou_separate_chromosomes(prediction_chromosomes,
                                        label_chromosomes):
     """
+    Calculates the iou between the best matching chromosome pairs
     tensors of shape [channels, x, y]
     :param prediction_chromosomes: tensor of individual chromosomes as channels
     :param label_chromosomes: tensor of individual chromosomes as channels
@@ -58,11 +94,7 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
     Testing is (val_synthetic, test_synthetic, val_real, test_real, val_original, test_original)
     """
 
-    def __init__(self,
-                 cross_validation_i: int,
-                 separate_input_channels: bool = False,
-                 use_boundary: bool = False
-                 ):
+    def __init__(self, cross_validation_i: int,):
         """
         The data has the following channels:
         Synthetic:
@@ -73,13 +105,9 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
         [input, separate_chromosomes(2 or more)]
 
         :param cross_validation_i: An integer in [0, 4) specifying which cross-validation split to select.
-        :param separate_input_channels: Whether to use two channels as input (True) or average them out (False)
-        :param use_boundary: Whether to output the chromosome boundary (True) or the dilated intersection (False)
         """
         super().__init__()
         self.cross_validation_i = cross_validation_i
-        self.separate_input_channels = separate_input_channels
-        self.use_boundary = use_boundary
 
         # Default params
         self.batchsize = 64
@@ -119,27 +147,26 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         # original dataset
-        if not self.separate_input_channels:
-            val_subsets_cv = {0: [(0.6, 0.8)],
-                              1: [(0.4, 0.6)],
-                              2: [(0.2, 0.4)],
-                              3: [(0.0, 0.2)]}
-            val_subset = val_subsets_cv[self.cross_validation_i]
-            test_subset = [(0.8, 1.0)]
-            self.dataset_original_val = datasets.OriginalChromosomeDataset(self.filepath_original,
-                                                                           val_subset,
-                                                                           True,
-                                                                           True,
-                                                                           self.batchsize,
-                                                                           fix_random_seed=True,
-                                                                           dtype=self.dtype)
-            self.dataset_original_test = datasets.OriginalChromosomeDataset(self.filepath_original,
-                                                                            test_subset,
-                                                                            True,
-                                                                            True,
-                                                                            self.batchsize,
-                                                                            fix_random_seed=True,
-                                                                            dtype=self.dtype)
+        val_subsets_cv = {0: [(0.6, 0.8)],
+                          1: [(0.4, 0.6)],
+                          2: [(0.2, 0.4)],
+                          3: [(0.0, 0.2)]}
+        val_subset = val_subsets_cv[self.cross_validation_i]
+        test_subset = [(0.8, 1.0)]
+        self.dataset_original_val = datasets.OriginalChromosomeDataset(self.filepath_original,
+                                                                       val_subset,
+                                                                       True,
+                                                                       True,
+                                                                       self.batchsize,
+                                                                       fix_random_seed=True,
+                                                                       dtype=self.dtype)
+        self.dataset_original_test = datasets.OriginalChromosomeDataset(self.filepath_original,
+                                                                        test_subset,
+                                                                        True,
+                                                                        True,
+                                                                        self.batchsize,
+                                                                        fix_random_seed=True,
+                                                                        dtype=self.dtype)
         # new synthetic dataset
         train_slides_cv = {0: (0, 1, 2,  3, 4, 5,  6, 7, 8),
                            1: (0, 1, 2,  3, 4, 5,  9, 10, 11),
@@ -153,16 +180,7 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
         val_slides = val_slides_cv[self.cross_validation_i]
         test_slides = (12, 13, 14)
 
-        if self.use_boundary:
-            if self.separate_input_channels:
-                output_channels_list = ['dapi', 'cy3', '3_channel', 'boundary', 'direction', 'ch_0', 'ch_1']
-            else:
-                output_channels_list = ['dapi_cy3', '3_channel', 'boundary', 'direction', 'ch_0', 'ch_1']
-        else:
-            if self.separate_input_channels:
-                output_channels_list = ['dapi', 'cy3', '3_channel', 'intersection_dilated', 'direction', 'ch_0', 'ch_1']
-            else:
-                output_channels_list = ['dapi_cy3', '3_channel', 'intersection_dilated', 'direction', 'ch_0', 'ch_1']
+        output_channels_list = ['dapi_cy3', '3_channel', 'intersection_dilated', 'direction', 'ch_0', 'ch_1']
 
         self.dataset_synthetic_train = datasets.SyntheticChromosomeDataset(self.filepath_new_synthetic,
                                                                            self.imsize_synthetic,
@@ -198,14 +216,14 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
         self.dataset_real_val = datasets.RealOverlappingChromosomes(self.filepath_real,
                                                                     False,
                                                                     (0, 0.5),
-                                                                    separate_channels=self.separate_input_channels,
+                                                                    separate_channels=False,
                                                                     half_resolution=True,
                                                                     output_categories=None,
                                                                     dtype=self.dtype)
         self.dataset_real_test = datasets.RealOverlappingChromosomes(self.filepath_real,
                                                                      False,
                                                                      (0.5, 1),
-                                                                     separate_channels=self.separate_input_channels,
+                                                                     separate_channels=False,
                                                                      half_resolution=True,
                                                                      output_categories=None,
                                                                      dtype=self.dtype)
@@ -240,67 +258,31 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
                                           batch_size=None,
                                           num_workers=self.num_workers,
                                           pin_memory=self.num_workers > 0)
-        if self.separate_input_channels:
-            return dataloader_synthetic_val, dataloader_synthetic_test, dataloader_real_val, dataloader_real_test
-        else:
-            dataloader_original_val = DataLoader(self.dataset_original_val,
-                                                 batch_size=None,
-                                                 num_workers=self.num_workers,
-                                                 pin_memory=self.num_workers > 0)
-            dataloader_original_test = DataLoader(self.dataset_original_test,
-                                                  batch_size=None,
-                                                  num_workers=self.num_workers,
-                                                  pin_memory=self.num_workers > 0)
+        dataloader_original_val = DataLoader(self.dataset_original_val,
+                                             batch_size=None,
+                                             num_workers=self.num_workers,
+                                             pin_memory=self.num_workers > 0)
+        dataloader_original_test = DataLoader(self.dataset_original_test,
+                                              batch_size=None,
+                                              num_workers=self.num_workers,
+                                              pin_memory=self.num_workers > 0)
 
-            return dataloader_synthetic_val, dataloader_synthetic_test,\
-                   dataloader_real_val, dataloader_real_test,\
-                   dataloader_original_val, dataloader_original_test
+        return dataloader_synthetic_val, dataloader_synthetic_test,\
+               dataloader_real_val, dataloader_real_test,\
+               dataloader_original_val, dataloader_original_test
 
 
 class InstanceSegmentationModule(pl.LightningModule):
-    def __init__(self, representation: str, smaller_network: bool, separate_input_channels: bool = False,
-                 use_boundary: bool = False):
+    def __init__(self, smaller_network: bool):
         """
         Module with hard coded parameters for everything.
-        :param representation: Which direction representation to use. One of the following:
-            ('angle',
-            'vector',
-            'da_vector',
-            'piecewise',
-            'piecewise_adjusted_linear_choice',
-            'piecewise_adjusted_smooth_choice',
-            'piecewise_adjusted_sum')
         :param smaller_network: Whether to use the smaller network (Hu et al) or larger (Saleh et al)
         :param separate_input_channels: Whether to use two channels as input (True) or average them out (False)
-        :param use_boundary: Whether to output the chromosome boundary (True) or the dilated intersection (False)
         """
         super().__init__()
         self.save_hyperparameters()
 
-        self.representation = representation
-        self.separate_input_channels = separate_input_channels
-        self.use_boundary = use_boundary
-        n_channels_in = 2 if separate_input_channels else 1
-
-        if representation == 'angle':
-            n_output_channels = 5
-        elif representation == 'vector':
-            n_output_channels = 6
-        elif representation == 'da_vector':
-            n_output_channels = 6
-        elif representation.__contains__('piecewise'):
-            n_output_channels = 8
-        else:
-            raise ValueError(f"representations == '{representation}' is invalid")
-
-        self.angle_2_repr = rep_2d_pytorch.get_angle_2_repr(representation)
-        self.repr_2_angle = rep_2d_pytorch.get_repr_2_angle(representation)
-        self.angle_difference_function = rep_2d_losses.define_angular_loss_nored(pi)
-
-        if use_boundary:
-            self.clustering = ClusteringWithBoundary()
-        else:
-            self.clustering = Clustering()
+        self.clustering = Clustering()
 
         # hardcoded parameters
         if smaller_network:
@@ -311,8 +293,8 @@ class InstanceSegmentationModule(pl.LightningModule):
                                               groups=1,
                                               norm_layer=torch.nn.BatchNorm2d,
                                               raw_output=False)
-            self.net = networks.Unet(n_channels_in=n_channels_in,
-                                     n_channels_out=n_output_channels,
+            self.net = networks.Unet(n_channels_in=1,
+                                     n_channels_out=6,
                                      n_channels_start=64,
                                      depth_encoder=2,
                                      depth_decoder=2,
@@ -329,8 +311,8 @@ class InstanceSegmentationModule(pl.LightningModule):
                                               groups=1,
                                               norm_layer=torch.nn.BatchNorm2d,
                                               raw_output=False)
-            self.net = networks.Unet(n_channels_in=n_channels_in,
-                                     n_channels_out=n_output_channels,
+            self.net = networks.Unet(n_channels_in=1,
+                                     n_channels_out=6,
                                      n_channels_start=64,
                                      depth_encoder=2,
                                      depth_decoder=2,
@@ -344,7 +326,7 @@ class InstanceSegmentationModule(pl.LightningModule):
         batch_prediction = self.net(x)
         batch_prediction_3category = torch.argmax(batch_prediction[:, 0:3, ...], dim=1, keepdim=True).detach()
         batch_prediction_dilated_intersection = (batch_prediction[:, 3:4, ...] > 0).type(self.dtype).detach()
-        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction[:, 4:, ...]).detach()
+        batch_prediction_direction_angle = da_vector_2_angle(batch_prediction[:, 4:, ...]).detach()
 
         all_separate_chromosomes = []
         for prediction_3_category, prediction_dilated_intersection, prediction_direction_angle in \
@@ -375,7 +357,7 @@ class InstanceSegmentationModule(pl.LightningModule):
         batch_prediction = self.net(batch_in)
         batch_prediction_3_category_channels = batch_prediction[:, 0:3, ...]
         batch_prediction_dilated_intersection = batch_prediction[:, 3:4, ...]
-        batch_prediction_direction_representation = batch_prediction[:, 4:, ...]
+        batch_prediction_direction_da_vector = batch_prediction[:, 4:, ...]
 
         loss_3category = torch.nn.functional.cross_entropy(
             batch_prediction_3_category_channels,
@@ -387,10 +369,10 @@ class InstanceSegmentationModule(pl.LightningModule):
         )
 
         # only calculate direction loss on pixels that have unique chromosomes.
-        batch_label_direction_representation = self.angle_2_repr(batch_label_direction_angle)
+        batch_label_direction_da_vector = angle_2_da_vector(batch_label_direction_angle)
         loss_direction_nored = torch.nn.functional.smooth_l1_loss(
-            batch_prediction_direction_representation,
-            batch_label_direction_representation,
+            batch_prediction_direction_da_vector,
+            batch_label_direction_da_vector,
             reduction='none'
         )
         mask = torch.eq(batch_label_3_category_index, 1).type(self.dtype)
@@ -400,7 +382,7 @@ class InstanceSegmentationModule(pl.LightningModule):
 
         # metrics
         batch_prediction_3_category_index = torch.argmax(batch_prediction_3_category_channels, dim=1, keepdim=True)
-        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction_direction_representation)
+        batch_prediction_direction_angle = da_vector_2_angle(batch_prediction_direction_da_vector)
 
         metrics = self._calculate_metrics_raw(
             batch_prediction_3_category_index,
@@ -436,7 +418,7 @@ class InstanceSegmentationModule(pl.LightningModule):
 
         # raw metrics
         batch_prediction_3_category_index = torch.argmax(batch_prediction_3_category_channels, dim=1, keepdim=True)
-        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction_direction_representation)
+        batch_prediction_direction_angle = da_vector_2_angle(batch_prediction_direction_representation)
 
         dataset_name = 'val_synthetic'
         batch_label_3_category_index = batch_label[:, 0:1, ...].long()
@@ -456,21 +438,17 @@ class InstanceSegmentationModule(pl.LightningModule):
         self.log_dict(metrics, on_epoch=True)
 
     def test_step(self, batch, batch_step, dataloader_idx):
-        if self.separate_input_channels:
-            batch_in = batch[:, 0:2, ...].detach()
-            batch_label = batch[:, 2:, ...].detach()
-        else:
-            batch_in = batch[:, 0:1, ...].detach()
-            batch_label = batch[:, 1:, ...].detach()
+        batch_in = batch[:, 0:1, ...].detach()
+        batch_label = batch[:, 1:, ...].detach()
 
         batch_prediction = self.net(batch_in)
         batch_prediction_3_category_channels = batch_prediction[:, 0:3, ...]
         batch_prediction_dilated_intersection = batch_prediction[:, 3:4, ...]
-        batch_prediction_direction_representation = batch_prediction[:, 4:, ...]
+        batch_prediction_direction_da_vector = batch_prediction[:, 4:, ...]
 
         # raw metrics
         batch_prediction_3_category_index = torch.argmax(batch_prediction_3_category_channels, dim=1, keepdim=True)
-        batch_prediction_direction_angle = self.repr_2_angle(batch_prediction_direction_representation)
+        batch_prediction_direction_angle = da_vector_2_angle(batch_prediction_direction_da_vector)
 
         if dataloader_idx == 0:
             dataset_name = 'val_synthetic'
@@ -585,8 +563,7 @@ class InstanceSegmentationModule(pl.LightningModule):
             )
         )
 
-        angle_difference = self.angle_difference_function(batch_prediction_direction_angle,
-                                                          batch_label_direction_angle)
+        angle_difference = angular_distance(batch_prediction_direction_angle, batch_label_direction_angle)
         mask = torch.eq(batch_prediction_3_category_index, 1).type(self.dtype)
         max_angle_difference = torch.amax(angle_difference * mask, dim=[1, 2, 3])
         sum_angle_difference = torch.sum(angle_difference * mask, dim=[1, 2, 3])
@@ -614,35 +591,18 @@ class InstanceSegmentationModule(pl.LightningModule):
         return metrics
 
 
-def train(representation: str,
-          smaller_network: bool,
-          separate_input_channels: bool,
-          cross_validation_i: int,
-          use_boundary: bool = False):
+def train(smaller_network: bool,
+          cross_validation_i: int):
 
-    assert representation in ('angle',
-                              'vector',
-                              'da_vector',
-                              'piecewise',
-                              'piecewise_adjusted_linear_choice',
-                              'piecewise_adjusted_smooth_choice',
-                              'piecewise_adjusted_sum')
-    if use_boundary:
-        root_path = 'results/instance_segmentation_boundary'
-    else:
-        root_path = 'results/instance_segmentation'
+    root_path = 'results/instance_segmentation'
 
-    name = f"{representation}" \
-           f"_{'snet' if smaller_network else 'lnet'}" \
-           f"_{'separate' if separate_input_channels else 'averaged'}" \
-           f"/cv{cross_validation_i}"
+    name = os.path.join(f"{'snet' if smaller_network else 'lnet'}", f"cv{cross_validation_i}")
 
     max_epochs = 128
     early_stopping_patience = 8
 
-    instance_segmentation_module = InstanceSegmentationModule(representation, smaller_network, separate_input_channels)
-    instance_segmentation_data_module = InstanceSegmentationDataModule(cross_validation_i, separate_input_channels,
-                                                                       use_boundary=use_boundary)
+    instance_segmentation_module = InstanceSegmentationModule(smaller_network)
+    instance_segmentation_data_module = InstanceSegmentationDataModule(cross_validation_i)
 
     logger = pl_loggers.TensorBoardLogger(root_path, name=name, default_hp_metric=False)
 
@@ -661,21 +621,12 @@ def train(representation: str,
 
 def train_all(use_boundary: bool = False):
     for smaller_network in (False, True):
-        for separate_input_channels in (True, False):
-            for representation in ('angle',
-                                   'vector',
-                                   'da_vector',
-                                   'piecewise',
-                                   'piecewise_adjusted_linear_choice',
-                                   'piecewise_adjusted_smooth_choice',
-                                   'piecewise_adjusted_sum'):
-                for cross_validation_i in (0, 1, 2, 3):
-                    train(representation, smaller_network, separate_input_channels, cross_validation_i, use_boundary)
+        for cross_validation_i in (0, 1, 2, 3):
+            train(smaller_network, cross_validation_i)
 
 
 if __name__ == '__main__':
-    # train_all(True)
-    train('da_vector', False, False, 0, True)
+    train_all(True)
 
 
 

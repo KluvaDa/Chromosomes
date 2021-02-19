@@ -1,5 +1,4 @@
 import os
-from abc import ABC
 import urllib.request
 import tarfile
 import numpy as np
@@ -8,7 +7,6 @@ import torch.nn
 import torch.nn.functional
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
-import pytorch_lightning.metrics.functional.classification
 
 from typing import Sequence, Tuple, Union, Optional
 from torch.utils.data import DataLoader
@@ -41,26 +39,35 @@ class ClassificationDataModule(pl.LightningDataModule):
     order: (synthetic, real, original)
     """
     def __init__(self,
-                 train_on_original: bool,
+                 dataset_identifier: str,
                  cross_validation_i: int,
-                 segment_4_categories: bool,
-                 shuffle_first: Optional[bool],
-                 category_order: str = 'random',
                  ):
         """
-        :param train_on_original: Whether to use the original dataset to train, or the new synthetic
+        :param dataset_identifier: Which dataset to train on. One of the following:
+               'original' 'new_random', 'new_position', 'new_orientation', 'new_length'
         :param cross_validation_i: An integer in [0, 4) specifying which cross-validation split to select.
-        :param segment_4_categories: Whether to segment ch0 and ch1 separately (True), or together as one class (False)
-        :param shuffle_first: Whether to shuffle the images in the dataset before selecting the data_subset_ranges.
-                              Only required if train_on_original
-        :param category_order: How to determine ch1 and ch2. 'random', 'position', 'orientation', 'length'
         """
         super().__init__()
-        self.train_on_original = train_on_original
+        self.dataset_identifier = dataset_identifier
         self.cross_validation_i = cross_validation_i
-        self.segment_4_categories = segment_4_categories
-        self.shuffle_first = shuffle_first
-        self.category_order = category_order
+
+        if self.dataset_identifier == 'original':
+            self.train_on_original = True
+            self.category_order = 'random'
+        elif self.dataset_identifier == 'new_random':
+            self.train_on_original = False
+            self.category_order = 'random'
+        elif self.dataset_identifier == 'new_position':
+            self.train_on_original = False
+            self.category_order = 'position'
+        elif self.dataset_identifier == 'new_orientation':
+            self.train_on_original = False
+            self.category_order = 'orientation'
+        elif self.dataset_identifier == 'new_length':
+            self.train_on_original = False
+            self.category_order = 'length'
+        else:
+            raise ValueError(f'{self.dataset_identifier} is not a valid dataset identifier')
 
         # Default params
         self.batchsize = 64
@@ -115,21 +122,21 @@ class ClassificationDataModule(pl.LightningDataModule):
         if self.train_on_original:
             self.dataset_original_train = datasets.OriginalChromosomeDataset(self.filepath_original,
                                                                              train_subset,
-                                                                             self.segment_4_categories,
-                                                                             self.shuffle_first,
+                                                                             True,
+                                                                             False,
                                                                              self.batchsize,
                                                                              dtype=self.dtype)
         self.dataset_original_val = datasets.OriginalChromosomeDataset(self.filepath_original,
                                                                        val_subset,
-                                                                       self.segment_4_categories,
-                                                                       self.shuffle_first,
+                                                                       True,
+                                                                       False,
                                                                        self.batchsize,
                                                                        fix_random_seed=True,
                                                                        dtype=self.dtype)
         self.dataset_original_test = datasets.OriginalChromosomeDataset(self.filepath_original,
                                                                         test_subset,
-                                                                        self.segment_4_categories,
-                                                                        self.shuffle_first,
+                                                                        True,
+                                                                        False,
                                                                         self.batchsize,
                                                                         fix_random_seed=True,
                                                                         dtype=self.dtype)
@@ -146,10 +153,7 @@ class ClassificationDataModule(pl.LightningDataModule):
         val_slides = val_slides_cv[self.cross_validation_i]
         test_slides = (12, 13, 14)
 
-        if self.segment_4_categories:
-            output_channels_list = ['dapi_cy3', '4_channel']
-        else:
-            output_channels_list = ['dapi_cy3', '3_channel']
+        output_channels_list = ['dapi_cy3', '4_channel']
 
         if not self.train_on_original:
             self.dataset_synthetic_train = datasets.SyntheticChromosomeDataset(self.filepath_new_synthetic,
@@ -182,21 +186,20 @@ class ClassificationDataModule(pl.LightningDataModule):
                                                                           self.category_order,
                                                                           fix_random_seed=True,
                                                                           dtype=self.dtype)
-        n_categories = 4 if self.segment_4_categories else 3
         # real dataset
         self.dataset_real_val = datasets.RealOverlappingChromosomes(self.filepath_real,
-                                                                    self.segment_4_categories,
+                                                                    True,
                                                                     (0, 0.5),
                                                                     separate_channels=False,
                                                                     half_resolution=True,
-                                                                    output_categories=n_categories,
+                                                                    output_categories=4,
                                                                     dtype=self.dtype)
         self.dataset_real_test = datasets.RealOverlappingChromosomes(self.filepath_real,
-                                                                     self.segment_4_categories,
+                                                                     True,
                                                                      (0.5, 1),
                                                                      separate_channels=False,
                                                                      half_resolution=True,
-                                                                     output_categories=n_categories,
+                                                                     output_categories=4,
                                                                      dtype=self.dtype)
 
     def train_dataloader(self):
@@ -243,20 +246,15 @@ class ClassificationDataModule(pl.LightningDataModule):
 
 
 class ClassificationModule(pl.LightningModule):
-    def __init__(self, segment_4_categories: bool, smaller_network: bool):
+    def __init__(self, smaller_network: bool):
         """
         Module with hard coded parameters for everything.
-        :param segment_4_categories: Whether to segment ch0 and ch1 separately (True), or together as one class (False)
         :param smaller_network: Whether to use the smaller network (Hu et al) or larger (Saleh et al)
         """
         super().__init__()
-        self.segment_4_categories = segment_4_categories
-        self.n_categories = 4 if segment_4_categories else 3
-
         self.save_hyperparameters()
 
         # hardcoded parameters
-        n_channels_out = 4 if segment_4_categories else 3
         if smaller_network:
             backbone_net = networks.FullyConv(n_channels_in=128,
                                               ns_channels_layers=[256, 128],
@@ -266,7 +264,7 @@ class ClassificationModule(pl.LightningModule):
                                               norm_layer=torch.nn.BatchNorm2d,
                                               raw_output=False)
             self.net = networks.Unet(n_channels_in=1,
-                                     n_channels_out=n_channels_out,
+                                     n_channels_out=4,
                                      n_channels_start=64,
                                      depth_encoder=2,
                                      depth_decoder=2,
@@ -284,7 +282,7 @@ class ClassificationModule(pl.LightningModule):
                                               norm_layer=torch.nn.BatchNorm2d,
                                               raw_output=False)
             self.net = networks.Unet(n_channels_in=1,
-                                     n_channels_out=n_channels_out,
+                                     n_channels_out=4,
                                      n_channels_start=64,
                                      depth_encoder=2,
                                      depth_decoder=2,
@@ -348,85 +346,92 @@ class ClassificationModule(pl.LightningModule):
         batch_prediction = batch_prediction.detach()
         batch_label = batch_label.detach()
 
+        batch_label_background = torch.eq(batch_label, 0)
+        batch_label_ch0 = torch.eq(batch_label, 1)
+        batch_label_ch1 = torch.eq(batch_label, 2)
+        batch_label_overlap = torch.eq(batch_label, 3)
+
         batch_prediction_class = torch.argmax(batch_prediction, dim=1, keepdim=True)
 
-        if self.segment_4_categories:
-            iou_channel_pairs = [(0, 0), (1, 1), (2, 2), (3, 3), (1, 2), (2, 1)]
-        else:
-            iou_channel_pairs = [(0, 0), (1, 1), (2, 2)]
+        batch_prediction_background = torch.eq(batch_prediction_class, 0)
+        batch_prediction_ch0 = torch.eq(batch_prediction_class, 1)
+        batch_prediction_ch1 = torch.eq(batch_prediction_class, 2)
+        batch_prediction_overlap = torch.eq(batch_prediction_class, 3)
 
-        iou_channels = [calculate_binary_iou_batch(torch.eq(batch_prediction_class, i_pred),
-                                                   torch.eq(batch_label, i_label))
-                        for i_pred, i_label in iou_channel_pairs]
+        batch_iou_background = calculate_binary_iou_batch(batch_prediction_background, batch_label_background)
+        batch_iou_ch0 = calculate_binary_iou_batch(batch_prediction_ch0, batch_label_ch0)
+        batch_iou_ch1 = calculate_binary_iou_batch(batch_prediction_ch1, batch_label_ch1)
+        batch_iou_overlap = calculate_binary_iou_batch(batch_prediction_overlap, batch_label_overlap)
 
-        iou = torch.mean(torch.stack(iou_channels[0:self.n_categories], dim=0), dim=0)
+        batch_iou_ch0_switched = calculate_binary_iou_batch(batch_prediction_ch1, batch_label_ch0)
+        batch_iou_ch1_switched = calculate_binary_iou_batch(batch_prediction_ch0, batch_label_ch1)
 
-        metrics = {dataset_name+'_iou': torch.mean(iou),
-                   dataset_name+'_iou_background': torch.mean(iou_channels[0])}
-        if self.segment_4_categories:
-            metrics[dataset_name+'_iou_ch0'] = torch.mean(iou_channels[1])
-            metrics[dataset_name+'_iou_ch1'] = torch.mean(iou_channels[2])
-            metrics[dataset_name+'_iou_overlap'] = torch.mean(iou_channels[3])
+        switched_better = torch.lt(
+            torch.mean(torch.stack([batch_iou_ch0, batch_iou_ch1], dim=0), dim=0),
+            torch.mean(torch.stack([batch_iou_ch0_switched, batch_iou_ch1_switched], dim=0), dim=1)
+        )
+        standard_better = torch.logical_not(switched_better)
 
-            prediction_ch0_or_ch1 = torch.logical_or(
-                torch.eq(batch_prediction_class, 1),
-                torch.eq(batch_prediction_class, 2)
-            )
-            label_ch0_or_ch1 = torch.logical_or(
-                torch.eq(batch_label, 1),
-                torch.eq(batch_label, 2)
-            )
-            iou_ch0_or_ch1 = calculate_binary_iou_batch(prediction_ch0_or_ch1,
-                                                        label_ch0_or_ch1)
-            metrics[dataset_name+'_iou_ch0_or_ch1'] = torch.mean(iou_ch0_or_ch1)
-        else:
-            metrics[dataset_name+'_iou_ch'] = torch.mean(iou_channels[1])
-            metrics[dataset_name+'_iou_overlap'] = torch.mean(iou_channels[2])
+        batch_prediction_ch0_best = batch_prediction_ch0 * standard_better[:, None, None, None] + \
+                                    batch_prediction_ch1 * switched_better[:, None, None, None]
 
-        # calculate switched ch0/ch1 metrics
-        if self.segment_4_categories:
-            iou_switched = torch.mean(torch.stack([iou_channels[0],
-                                                   iou_channels[4],
-                                                   iou_channels[5],
-                                                   iou_channels[3]], dim=0), dim=0)
+        batch_prediction_ch1_best = batch_prediction_ch1 * standard_better[:, None, None, None] + \
+                                    batch_prediction_ch0 * switched_better[:, None, None, None]
 
-            iou_best_match = torch.maximum(iou_switched, iou)
-            metrics[dataset_name+'_iou_best_match'] = torch.mean(iou_best_match)
+        batch_iou_ch0_best = calculate_binary_iou_batch(batch_prediction_ch0_best, batch_label_ch0)
+        batch_iou_ch1_best = calculate_binary_iou_batch(batch_prediction_ch1_best, batch_label_ch1)
 
-            switched_better = iou_switched > iou
-            standard_better = iou_switched < iou
+        batch_iou_ch0_or_ch1 = calculate_binary_iou_batch(
+            torch.logical_or(batch_prediction_ch0, batch_prediction_ch1),
+            torch.logical_or(batch_label_ch1, batch_label_ch1)
+        )  # no need to use best, because OR is the same
 
-            iou_ch0_best_match = switched_better * iou_channels[4] + standard_better * iou_channels[1]
-            iou_ch1_best_match = switched_better * iou_channels[5] + standard_better * iou_channels[2]
-            metrics[dataset_name+'_iou_ch0_best_match'] = torch.mean(iou_ch0_best_match)
-            metrics[dataset_name+'_iou_ch1_best_match'] = torch.mean(iou_ch1_best_match)
+        batch_iou_separated_ch0 = calculate_binary_iou_batch(
+            torch.logical_or(batch_prediction_ch0_best, batch_prediction_overlap),
+            torch.logical_or(batch_label_ch0, batch_label_overlap)
+        )
+
+        batch_iou_separated_ch1 = calculate_binary_iou_batch(
+            torch.logical_or(batch_prediction_ch1_best, batch_prediction_overlap),
+            torch.logical_or(batch_label_ch1, batch_label_overlap)
+        )
+
+        iou_background = torch.mean(batch_iou_background)
+        iou_ch0_best = torch.mean(batch_iou_ch0_best)
+        iou_ch1_best = torch.mean(batch_iou_ch1_best)
+        iou_overlap = torch.mean(batch_iou_overlap)
+
+        average_iou_classes = torch.mean(torch.stack([iou_background, iou_ch0_best, iou_ch1_best, iou_overlap]))
+        average_iou_separated = torch.mean(torch.stack([batch_iou_separated_ch0, batch_iou_separated_ch1]))
+
+        metrics = {dataset_name + '_iou_background': torch.mean(batch_iou_background),
+                   dataset_name + '_iou_ch0': torch.mean(batch_iou_ch0_best),
+                   dataset_name + '_iou_ch1': torch.mean(batch_iou_ch1_best),
+                   dataset_name + '_iou_overlap': torch.mean(batch_iou_overlap),
+                   dataset_name + '_average_iou_classes': average_iou_classes,
+                   dataset_name + '_average_iou_separated': average_iou_separated}
 
         return metrics
 
 
-def train(smaller_network: bool,
-          cross_validation_i: int,
-          train_on_original: bool,
-          segment_4_categories: bool,
-          shuffle_first: Optional[bool],
-          category_order: str):
+def train(dataset_identifier: str,
+          smaller_network: bool,
+          cross_validation_i: int):
 
-    name = f"{'original' if train_on_original else 'synthetic'}" \
-           f"_{4 if segment_4_categories else 3}category" \
-           f"_{'snet' if smaller_network else 'lnet'}" \
-           f"_{'shuffled' if shuffle_first else 'ordered'}" \
-           f"_{category_order}" \
-           f"/cv{cross_validation_i}"
+    run_name = os.path.join(f"{dataset_identifier}_{'snet' if smaller_network else 'lnet'}", f"cv{cross_validation_i}")
 
     max_epochs = 128
     early_stopping_patience = 8
 
-    classification_module = ClassificationModule(segment_4_categories, smaller_network)
-    classification_data_module = ClassificationDataModule(train_on_original, cross_validation_i, segment_4_categories,
-                                                          shuffle_first, category_order)
-    logger = pl_loggers.TensorBoardLogger('results/classification', name=name, default_hp_metric=False)
+    classification_module = ClassificationModule(smaller_network)
+    classification_data_module = ClassificationDataModule(dataset_identifier, cross_validation_i)
+    logger = pl_loggers.TensorBoardLogger('results/semantic_segmentation', name=run_name, default_hp_metric=False)
 
-    main_metric = 'val_original_iou/dataloader_idx_2' if train_on_original else 'val_synthetic_iou/dataloader_idx_0'
+    if dataset_identifier == 'original':
+        main_metric = 'val_original_iou/dataloader_idx_2'
+    else:
+        main_metric = 'val_synthetic_iou/dataloader_idx_0'
+
     early_stopping_callback = pl.callbacks.EarlyStopping(main_metric,
                                                          patience=early_stopping_patience,
                                                          mode='max')
@@ -440,33 +445,11 @@ def train(smaller_network: bool,
 
 
 def train_all():
-    for smaller_network in (True, False):
-        for segment_4_categories, train_on_original, shuffle_first, category_order in (
-                (True, True, True, 'random'),
-                (True, True, False, 'random'),
-                (False, True, True, 'random'),
-                (False, True, False, 'random'),
-                (True, False, None, 'random'),
-                (True, False, None, 'position'),
-                (True, False, None, 'orientation'),
-                (True, False, None, 'length'),
-                (False, False, None, 'random')):
+    for smaller_network in (False, True):
+        for dataset_identifier in ('original' 'new_random', 'new_position', 'new_orientation', 'new_length'):
             for cross_validation_i in (0, 1, 2, 3):
-                train(smaller_network, cross_validation_i, train_on_original, segment_4_categories, shuffle_first, category_order)
-
-
-def train_subset():
-    for train_on_original, category_order in (
-                (True, 'random'),
-                (False, 'random'),
-                (False, 'position'),
-                (False, 'orientation'),
-                (False, 'length'),
-                (False, 'random')):
-        for cross_validation_i in (0, 1, 2, 3):
-            train(False, cross_validation_i, train_on_original, True, False, category_order)
+                train(dataset_identifier, smaller_network, cross_validation_i)
 
 
 if __name__ == '__main__':
-    # train_all()
-    train_subset()
+    train_all()

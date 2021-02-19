@@ -10,7 +10,7 @@ import pandas as pd
 from tensorboard.backend.event_processing import event_accumulator
 from typing import Dict
 
-import classification
+import semantic_segmentation
 import tensorboard_reader
 
 
@@ -43,7 +43,7 @@ def load_module(dirpath: str, cross_validation: int):
     checkpoint = os.path.join(checkpoints_dir, checkpoint_name)
 
     # load module
-    classification_module = classification.ClassificationModule.load_from_checkpoint(checkpoint)
+    classification_module = semantic_segmentation.ClassificationModule.load_from_checkpoint(checkpoint)
     return classification_module
 
 
@@ -59,11 +59,11 @@ def evaluate(root_path: str, run_name: str, i_cv: int, clustering=None):
         interpret_dirname(run_name)
 
     dirpath = os.path.join(root_path, run_name)
-    data_module = classification.ClassificationDataModule(train_on_original=train_on_original,
-                                                          cross_validation_i=i_cv,
-                                                          segment_4_categories=segment_4_categories,
-                                                          shuffle_first=False,
-                                                          category_order=category_order)
+    data_module = semantic_segmentation.ClassificationDataModule(train_on_original=train_on_original,
+                                                                 cross_validation_i=i_cv,
+                                                                 segment_4_categories=segment_4_categories,
+                                                                 shuffle_first=False,
+                                                                 category_order=category_order)
     module = load_module(dirpath, i_cv)
     trainer = pl.Trainer(gpus=1)
     test_metrics = trainer.test(module, datamodule=data_module)
@@ -176,11 +176,11 @@ def save_images(root_path, run_name, n_images, cross_validation=0):
         interpret_dirname(run_name)
 
     classification_module = load_module(os.path.join(root_path, run_name), cross_validation=0)
-    data_module = classification.ClassificationDataModule(train_on_original=train_on_original,
-                                                          cross_validation_i=cross_validation,
-                                                          segment_4_categories=segment_4_categories,
-                                                          shuffle_first=False,
-                                                          category_order=category_order)
+    data_module = semantic_segmentation.ClassificationDataModule(train_on_original=train_on_original,
+                                                                 cross_validation_i=cross_validation,
+                                                                 segment_4_categories=segment_4_categories,
+                                                                 shuffle_first=False,
+                                                                 category_order=category_order)
     data_module.setup()
     dataloader_synthetic, dataloader_real, dataloader_original = data_module.val_dataloader()
     iterator_synthetic = iter(dataloader_synthetic)

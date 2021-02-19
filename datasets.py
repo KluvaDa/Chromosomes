@@ -5,18 +5,42 @@ from math import pi
 import scipy.ndimage
 import pickle
 import h5py
-import pytorch_lightning as pl
 
 from typing import Sequence, Tuple, Union, Optional
 from torch.utils.data import IterableDataset, get_worker_info
-
-from representations import rep_2d_numpy
 
 
 def load_pickle(path):
     with open(path, 'rb') as file:
         data = pickle.load(file)
     return data
+
+
+def angle_2_da_vector(angles: np.ndarray) -> np.ndarray:
+    """
+    Angles in radians to double-angle vector space; 0 radians -> (1, 0), pi/4 radians -> (0, 1)
+    Args:
+        angles: torch.Tenor of shape (batch, 1, x, y)
+    Returns: torch tensor of shape (batch, 2, x, y)
+    """
+    double_angle = angles*2
+    da_vectors_x = np.cos(double_angle)
+    da_vectors_y = np.sin(double_angle)
+    da_vectors = np.concatenate([da_vectors_x, da_vectors_y], axis=1)
+    return da_vectors
+
+
+def da_vector_2_angle(vectors: np.ndarray) -> np.ndarray:
+    """
+    Double-angle vector space to angles in radians in range [0, pi); (1, 0) -> 0 radians, (0, 1) -> pi/4 radians
+    Args:
+        vectors: torch.Tensor of shape (batch, 2, x, y)
+    Returns: torch.Tensor of shape (batch, 1, x, y)
+    """
+    double_angle = np.arctan2(vectors[:, 1:2, ...], vectors[:, 0:1, ...])
+    double_angle = np.remainder(double_angle, 2*pi)
+    angle = double_angle / 2
+    return angle
 
 
 class RealOverlappingChromosomes(IterableDataset):
@@ -456,11 +480,11 @@ class SyntheticChromosomeDataset(IterableDataset):
 
         # ROTATE ANGLES
         # translate angles to doubleangle vectors (need empty batch dimensions 0)
-        ch_doubleangle = rep_2d_numpy.angle_2_da_vector(np.expand_dims(ch[4:5], 0))
+        ch_doubleangle = angle_2_da_vector(np.expand_dims(ch[4:5], 0))
         # perform rotation
         ch_doubleangle = scipy.ndimage.rotate(ch_doubleangle, rotation, axes=(2, 3), mode='nearest')
         # translate doubleangle to angles
-        ch_direction_rotated = rep_2d_numpy.da_vector_2_angle(ch_doubleangle)
+        ch_direction_rotated = da_vector_2_angle(ch_doubleangle)
         # rotate the angles themselves
         ch_direction_rotated += rotation * pi / 180
         # normalise angles to range [0, pi)
@@ -560,15 +584,14 @@ class SyntheticChromosomeDataset(IterableDataset):
         return np.stack(output, axis=0)
 
 
-
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     datasets = [
-        # OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
+        OriginalChromosomeDataset('data/Cleaned_LowRes_13434_overlapping_pairs.h5', [(0, 0.8)], True, True, 1),
         SyntheticChromosomeDataset('data/separate.pickle', (128, 128), [0, 1, 2, 3], True, 1, 10,
                                    ['dapi_cy3', 'boundary'], 'length', True),
-        # RealOverlappingChromosomes('data', False, (0.2, 0.9), False, True, 3),
+        RealOverlappingChromosomes('data', False, (0.2, 0.9), False, True, 3),
     ]
 
     from torch.utils.data import DataLoader
@@ -584,4 +607,3 @@ if __name__ == '__main__':
                 plt.close()
                 plt.imshow(batch[0, channel])
                 plt.show()
-    print('Done')
