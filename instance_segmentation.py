@@ -1,5 +1,4 @@
 import os
-from abc import ABC
 import urllib.request
 import tarfile
 import numpy as np
@@ -8,9 +7,7 @@ import torch.nn
 import torch.nn.functional
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
-import pytorch_lightning.metrics.functional.classification
 from math import pi
-import scipy.ndimage.morphology
 
 
 from typing import Sequence, Tuple, Union, Optional, List
@@ -19,7 +16,7 @@ from torch.utils.data import DataLoader
 import networks
 import datasets
 from semantic_segmentation import calculate_binary_iou_batch
-from clustering import Clustering, ClusteringWithBoundary
+from clustering import Clustering
 
 
 def angle_2_da_vector(angles: torch.Tensor) -> torch.Tensor:
@@ -277,7 +274,6 @@ class InstanceSegmentationModule(pl.LightningModule):
         """
         Module with hard coded parameters for everything.
         :param smaller_network: Whether to use the smaller network (Hu et al) or larger (Saleh et al)
-        :param separate_input_channels: Whether to use two channels as input (True) or average them out (False)
         """
         super().__init__()
         self.save_hyperparameters()
@@ -342,12 +338,8 @@ class InstanceSegmentationModule(pl.LightningModule):
         return batch_prediction, all_separate_chromosomes
 
     def training_step(self, batch, batch_step):
-        if self.separate_input_channels:
-            batch_in = batch[:, 0:2, ...]
-            batch_label = batch[:, 2:, ...]
-        else:
-            batch_in = batch[:, 0:1, ...]
-            batch_label = batch[:, 1:, ...]
+        batch_in = batch[:, 0:1, ...]
+        batch_label = batch[:, 1:, ...]
 
         batch_label_3_category_index = batch_label[:, 0:1, ...].long()
         batch_label_dilated_intersection = batch_label[:, 1:2, ...]
@@ -404,12 +396,8 @@ class InstanceSegmentationModule(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_step):
-        if self.separate_input_channels:
-            batch_in = batch[:, 0:2, ...].detach()
-            batch_label = batch[:, 2:, ...].detach()
-        else:
-            batch_in = batch[:, 0:1, ...].detach()
-            batch_label = batch[:, 1:, ...].detach()
+        batch_in = batch[:, 0:1, ...].detach()
+        batch_label = batch[:, 1:, ...].detach()
 
         batch_prediction = self.net(batch_in)
         batch_prediction_3_category_channels = batch_prediction[:, 0:3, ...]
@@ -619,14 +607,14 @@ def train(smaller_network: bool,
     trainer.fit(instance_segmentation_module, datamodule=instance_segmentation_data_module)
 
 
-def train_all(use_boundary: bool = False):
+def train_all():
     for smaller_network in (False, True):
         for cross_validation_i in (0, 1, 2, 3):
             train(smaller_network, cross_validation_i)
 
 
 if __name__ == '__main__':
-    train_all(True)
+    train_all()
 
 
 

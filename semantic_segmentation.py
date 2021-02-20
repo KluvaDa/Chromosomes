@@ -368,7 +368,7 @@ class ClassificationModule(pl.LightningModule):
 
         switched_better = torch.lt(
             torch.mean(torch.stack([batch_iou_ch0, batch_iou_ch1], dim=0), dim=0),
-            torch.mean(torch.stack([batch_iou_ch0_switched, batch_iou_ch1_switched], dim=0), dim=1)
+            torch.mean(torch.stack([batch_iou_ch0_switched, batch_iou_ch1_switched], dim=0), dim=0)
         )
         standard_better = torch.logical_not(switched_better)
 
@@ -446,7 +446,7 @@ def train(dataset_identifier: str,
 
 def train_all():
     for smaller_network in (False, True):
-        for dataset_identifier in ('original' 'new_random', 'new_position', 'new_orientation', 'new_length'):
+        for dataset_identifier in ('original', 'new_random', 'new_position', 'new_orientation', 'new_length'):
             for cross_validation_i in (0, 1, 2, 3):
                 train(dataset_identifier, smaller_network, cross_validation_i)
 

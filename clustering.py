@@ -8,17 +8,19 @@ import skimage.morphology
 
 from typing import Sequence, Tuple, Union, Optional, List
 
-from instance_segmentation import da_vector_2_angle, angle_2_da_vector
 
-
-class ClusteringWithBoundary:
+def angle_2_da_vector(angles: np.ndarray) -> np.ndarray:
     """
-    Separates direction-style network output with boudnary instead of dilated_intersection into separate chromosomes.
-    Works on a single image (no batch)
-    The hyperparameters are saved in the __init__ function.
+    Angles in radians to double-angle vector space; 0 radians -> (1, 0), pi/4 radians -> (0, 1)
+    Args:
+        angles: torch.Tenor of shape (batch, 1, x, y)
+    Returns: torch tensor of shape (batch, 2, x, y)
     """
-    def __init__(self):
-        pass
+    double_angle = angles*2
+    da_vectors_x = np.cos(double_angle)
+    da_vectors_y = np.sin(double_angle)
+    da_vectors = np.concatenate([da_vectors_x, da_vectors_y], axis=1)
+    return da_vectors
 
 
 class Clustering:
