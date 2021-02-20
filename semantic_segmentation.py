@@ -428,9 +428,9 @@ def train(dataset_identifier: str,
     logger = pl_loggers.TensorBoardLogger('results/semantic_segmentation', name=run_name, default_hp_metric=False)
 
     if dataset_identifier == 'original':
-        main_metric = 'val_original_iou/dataloader_idx_2'
+        main_metric = 'val_original_average_iou_classes/dataloader_idx_2'
     else:
-        main_metric = 'val_synthetic_iou/dataloader_idx_0'
+        main_metric = 'val_synthetic_average_iou_classes/dataloader_idx_0'
 
     early_stopping_callback = pl.callbacks.EarlyStopping(main_metric,
                                                          patience=early_stopping_patience,
