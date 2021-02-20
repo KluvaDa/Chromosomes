@@ -7,7 +7,6 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from clustering import Clustering
-import ax
 from math import pi
 
 from typing import Optional
@@ -36,119 +35,16 @@ def load_module(dirpath: str, cross_validation: int):
     return instance_segmentation_module
 
 
-def optimise_clustering():
-    """
-    Performs an optimisation of the clustering parameters and saves the results in 'results/clustering_optimisation.txt
-    """
-    clustering_parameters = [
-        {
-            'name': 'minimum_dilated_intersection_area',
-            'type': 'range',
-            'bounds': [24, 36],
-            'value_type': 'int',
-            'log_scale': True
-        },
-        {
-            'name': 'max_distance',
-            'type': 'range',
-            'bounds': [3, 5],
-            'value_type': 'int',
-            'log_scale': False
-        },
-        {
-            'name': 'merge_peaks_distance',
-            'type': 'range',
-            'bounds': [1, 3],
-            'value_type': 'int',
-            'log_scale': False
-        },
-        {
-            'name': 'minimum_clusters_area',
-            'type': 'range',
-            'bounds': [8, 16],
-            'value_type': 'int',
-            'log_scale': True
-        },
-        {
-            'name': 'minimum_adjacent_area',
-            'type': 'range',
-            'bounds': [6, 14],
-            'value_type': 'int',
-            'log_scale': True
-        },
-        {
-            'name': 'direction_sensitivity',
-            'type': 'range',
-            'bounds': [0.7, 0.95],
-            'value_type': 'float',
-            'log_scale': False
-        },
-        {
-            'name': 'cluster_grow_radius',
-            'type': 'fixed',
-            'value': 1.2
-        },
-        {
-            'name': 'max_chromosome_width',
-            'type': 'range',
-            'bounds': [6, 16],
-            'value_type': 'int',
-            'log_scale': True
-        },
-        {
-            'name': 'intersection_grow_radius',
-            'type': 'fixed',
-            'value': 1.2
-        },
-        {
-            'name': 'direction_local_weight',
-            'type': 'range',
-            'bounds': [0.8, 1],
-            'value_type': 'float',
-            'log_scale': False
-        }
-    ]
-    best_parameters, best_values, experiment, model = ax.optimize(clustering_parameters,
-                                                                  optimisation_function,
-                                                                  minimize=False,
-                                                                  total_trials=100)
-    with open('results/clustering_optimisation.txt', 'w') as f:
-        f.write(str(best_parameters))
-        f.write('\n')
-        f.write(str(best_values))
-
-
-def optimisation_function(clustering_parameters):
-    """ Takes the parameters for clustering and returns an overall metric by validating on da_vector_lnet_separate"""
-    root_path = 'results/instance_segmentation'
-    run_name = 'da_vector_lnet_separate'
-    clustering = Clustering(**clustering_parameters)
-    main_metric_average = 0
-    for i_cv in range(4):
-        metrics = evaluate(root_path, run_name, i_cv, clustering)
-        main_metric = \
-            metrics['val_synthetic_iou_separate_chromosomes/dataloader_idx_0'] * 0.5 \
-            + metrics['val_real_iou_separate_chromosomes/dataloader_idx_2'] * 0.5 \
-            - abs(metrics['val_synthetic_n_chromosomes_difference/dataloader_idx_0']) * 0.05 \
-            - abs(metrics['val_real_n_chromosomes_difference/dataloader_idx_2']) * 0.05
-        main_metric_average += main_metric
-    main_metric_average /= 4
-    return main_metric_average
-
-
-def evaluate(root_path: str, run_name: str, i_cv: int, clustering=None):
+def evaluate(root_path: str, dirname: str, i_cv: int, clustering=None):
     """
     Runs validation and testing and returns the metrics dictionary
     :param root_path: Path to where the runs are saved
-    :param run_name: Name of the run
+    :param dirname: Name of the run
     :param i_cv: The cross validation run in (0, 1, 2, 3) to evaluate
     :param clustering: a clustering object that overrides the default clustering parameters
     """
-    run_name_parts = run_name.split('_')
-    separate_input_channels = run_name_parts[-1] == 'separate'
-
-    dirpath = os.path.join(root_path, run_name)
-    data_module = InstanceSegmentationDataModule(i_cv, separate_input_channels)
+    dirpath = os.path.join(root_path, dirname)
+    data_module = InstanceSegmentationDataModule(i_cv)
     module = load_module(dirpath, i_cv)
     if clustering is not None:
         module.clustering = clustering
@@ -189,21 +85,17 @@ def evaluate_all():
     all_metrics.to_csv('results/instance_segmentation_test_metrics.csv')
 
 
-def visualise(root_path, run_name, n_images, i_cv=0, use_boundary=False):
+def visualise(root_path, run_name, n_images, i_cv=0):
     """
     Saves images of the test and validation in the root_path/run_name directory
     :param root_path: Path to where the runs are saved
     :param run_name: Name of the run
     :param n_images: How many images to save from each dataset
     :param i_cv: Which cross_validation run to use
-    :param use_boundary: Whether to use boundary version of clustering
     """
     with torch.no_grad():
-        run_name_parts = run_name.split('_')
-        separate_input_channels = run_name_parts[-1] == 'separate'
-
         dirpath = os.path.join(root_path, run_name)
-        data_module = InstanceSegmentationDataModule(i_cv, separate_input_channels, use_boundary=use_boundary)
+        data_module = InstanceSegmentationDataModule(i_cv)
         data_module.num_workers = 2
         module = load_module(dirpath, i_cv)
 
@@ -226,13 +118,12 @@ def visualise(root_path, run_name, n_images, i_cv=0, use_boundary=False):
             'real_val': iterator_real_val,
             'real_test': iterator_real_test}
 
-        if not separate_input_channels:
-            dataloader_original_val = dataloaders[4]
-            dataloader_original_test = dataloaders[5]
-            iterator_original_val = iter(dataloader_original_val)
-            iterator_original_test = iter(dataloader_original_test)
-            data_iterators['original_val'] = iterator_original_val
-            data_iterators['original_test'] = iterator_original_test
+        dataloader_original_val = dataloaders[4]
+        dataloader_original_test = dataloaders[5]
+        iterator_original_val = iter(dataloader_original_val)
+        iterator_original_test = iter(dataloader_original_test)
+        data_iterators['original_val'] = iterator_original_val
+        data_iterators['original_test'] = iterator_original_test
 
         for dataset_name, dataset_iterator in data_iterators.items():
             image_i = 0
@@ -241,12 +132,9 @@ def visualise(root_path, run_name, n_images, i_cv=0, use_boundary=False):
                     batch = next(dataset_iterator)
                 except StopIteration:
                     break
-                if separate_input_channels:
-                    batch_in = batch[:, 0:2, ...]
-                    batch_label = batch[:, 2:, ...]
-                else:
-                    batch_in = batch[:, 0:1, ...]
-                    batch_label = batch[:, 1:, ...]
+
+                batch_in = batch[:, 0:1, ...]
+                batch_label = batch[:, 1:, ...]
                 batch_prediction, all_separate_chromosomes = module(batch_in)
 
                 batch_prediction_category = torch.argmax(batch_prediction[:, 0:3, ...], dim=1, keepdim=True)
@@ -462,15 +350,9 @@ def visualise_all_boundary(n_images):
     for run_name in run_names:
         print(run_name)
         if os.path.isdir(os.path.join(root_path, run_name)):
-            visualise(root_path, run_name, n_images, 0, use_boundary=True)
+            visualise(root_path, run_name, n_images, 0)
 
 
 if __name__ == '__main__':
-    # evaluate_all()
-    # optimise_clustering()
-    # visualise_all(10)
-
-    root_path = 'results/instance_segmentation_boundary'
-    run_name = 'da_vector_lnet_averaged'
-    visualise(root_path, run_name, 10, 0, True)
-    # metrics = evaluate(root_path, run_name, 0)
+    evaluate_all()
+    visualise_all(10)
