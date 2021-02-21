@@ -141,7 +141,8 @@ def save_all_images(n_images):
     root_path = 'results/semantic_segmentation'
     run_names = os.listdir(root_path)
     for run_name in run_names:
-        if len(run_name.split('_')) == 5:
+        print(run_name)
+        if os.path.isdir(os.path.join(root_path, run_name)):
             save_images(root_path, run_name, n_images, 0)
 
 
