@@ -344,15 +344,6 @@ def visualise_all(n_images):
             visualise(root_path, run_name, n_images, 0)
 
 
-def visualise_all_boundary(n_images):
-    root_path = 'results/instance_segmentation_boundary'
-    run_names = os.listdir(root_path)
-    for run_name in run_names:
-        print(run_name)
-        if os.path.isdir(os.path.join(root_path, run_name)):
-            visualise(root_path, run_name, n_images, 0)
-
-
 if __name__ == '__main__':
     evaluate_all()
     visualise_all(10)
