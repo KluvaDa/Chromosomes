@@ -409,7 +409,8 @@ class ClassificationModule(pl.LightningModule):
                    dataset_name + '_iou_ch1': torch.mean(batch_iou_ch1_best),
                    dataset_name + '_iou_overlap': torch.mean(batch_iou_overlap),
                    dataset_name + '_average_iou_classes': average_iou_classes,
-                   dataset_name + '_average_iou_separated': average_iou_separated}
+                   dataset_name + '_average_iou_separated': average_iou_separated,
+                   dataset_name + '_iou_ch0_or_ch1': torch.mean(batch_iou_ch0_or_ch1)}
 
         return metrics
 
