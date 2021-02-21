@@ -75,7 +75,7 @@ def evaluate_all():
     """
     Evaluates all runs and saves the results as as csv file in results/instance_segmentation_test_metrics.csv
     """
-    root_path = 'results/classification_good'
+    root_path = 'results/semantic_segmentation'
     run_names = os.listdir(root_path)
     all_metrics = dict()
     for run_name in run_names:
@@ -138,15 +138,14 @@ def save_images(root_path, dirname, n_images, i_cv=0):
 
 
 def save_all_images(n_images):
-    root_path = 'results/classification'
+    root_path = 'results/semantic_segmentation'
     run_names = os.listdir(root_path)
     for run_name in run_names:
-        if len(run_name.split('_')) == 5:
+        print(run_name)
+        if os.path.isdir(os.path.join(root_path, run_name)):
             save_images(root_path, run_name, n_images, 0)
 
 
 if __name__ == '__main__':
     evaluate_all()
-
     save_all_images(10)
-
