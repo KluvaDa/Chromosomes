@@ -383,7 +383,7 @@ class ClassificationModule(pl.LightningModule):
 
         batch_iou_ch0_or_ch1 = calculate_binary_iou_batch(
             torch.logical_or(batch_prediction_ch0, batch_prediction_ch1),
-            torch.logical_or(batch_label_ch1, batch_label_ch1)
+            torch.logical_or(batch_label_ch0, batch_label_ch1)
         )  # no need to use best, because OR is the same
 
         batch_iou_separated_ch0 = calculate_binary_iou_batch(
