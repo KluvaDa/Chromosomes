@@ -516,61 +516,71 @@ class InstanceSegmentationModule(pl.LightningModule):
         return optimizer
 
     def _calculate_metrics_raw(self,
-                               batch_prediction_3_category_index,
+                               batch_prediction_class,
                                batch_prediction_dilated_intersection,
                                batch_prediction_direction_angle,
-                               batch_label_3_category_index,
+                               batch_label_class,
                                batch_label_dilated_intersection,
                                batch_label_direction_angle,
                                dataset_name):
         """
         Only works on synthetic dataset. Tensors of shape [batch, channels, x, y]
         """
-        batch_prediction_3_category_index = batch_prediction_3_category_index.detach()
-        batch_prediction_dilated_intersection = batch_prediction_dilated_intersection.detach()
-        batch_prediction_direction_angle = batch_prediction_direction_angle.detach()
-        batch_label_3_category_index = batch_label_3_category_index.detach()
+        batch_label_class = batch_label_class.detach()
         batch_label_dilated_intersection = batch_label_dilated_intersection.detach()
         batch_label_direction_angle = batch_label_direction_angle.detach()
 
-        iou_channels = [
-            torch.mean(
-                calculate_binary_iou_batch(
-                    torch.eq(batch_prediction_3_category_index, i),
-                    torch.eq(batch_label_3_category_index, i)
-                )
-            )
-            for i in range(3)
-        ]
-        iou_3category = torch.mean(torch.stack(iou_channels))
+        batch_prediction_class = batch_prediction_class.detach()
+        batch_prediction_dilated_intersection = batch_prediction_dilated_intersection.detach()
+        batch_prediction_direction_angle = batch_prediction_direction_angle.detach()
 
-        iou_dilated_intersection = torch.mean(
-            calculate_binary_iou_batch(
-                batch_prediction_dilated_intersection > 0,
-                batch_label_dilated_intersection > 0
-            )
-        )
+        # classes
+        batch_label_background = torch.eq(batch_label_class, 0)
+        batch_label_chromosome = torch.eq(batch_label_class, 1)
+        batch_label_overlap = torch.eq(batch_label_class, 2)
 
+        batch_prediction_background = torch.eq(batch_prediction_class, 0)
+        batch_prediction_chromosome = torch.eq(batch_prediction_class, 1)
+        batch_prediction_overlap = torch.eq(batch_prediction_class, 2)
+
+        batch_iou_background = calculate_binary_iou_batch(batch_prediction_background, batch_label_background)
+        batch_iou_chromosome = calculate_binary_iou_batch(batch_prediction_chromosome, batch_label_chromosome)
+        batch_iou_overlap = calculate_binary_iou_batch(batch_prediction_overlap, batch_label_overlap)
+
+        iou_background = torch.mean(batch_iou_background)
+        iou_chromosome = torch.mean(batch_iou_chromosome)
+        iou_overlap = torch.mean(batch_iou_overlap)
+
+        average_iou_classes = torch.mean(torch.stack([iou_background, iou_chromosome, iou_overlap]))
+
+        # dilated overlap
+        batch_iou_dilated_overlap = calculate_binary_iou_batch(
+            batch_prediction_dilated_intersection > 0, batch_label_dilated_intersection > 0)
+
+        iou_dilated_overlap = torch.mean(batch_iou_dilated_overlap)
+
+        # orientation
         angle_difference = angular_distance(batch_prediction_direction_angle, batch_label_direction_angle)
-        mask = torch.eq(batch_prediction_3_category_index, 1).type(self.dtype)
+        mask = batch_label_chromosome.type(self.dtype)
         max_angle_difference = torch.amax(angle_difference * mask, dim=[1, 2, 3])
         sum_angle_difference = torch.sum(angle_difference * mask, dim=[1, 2, 3])
 
         metric_max_angle = torch.mean(max_angle_difference)
         metric_average_angle = torch.mean(sum_angle_difference / torch.sum(mask, dim=[1, 2, 3]))
 
+        # main metric
         main_metric = metric_average_angle + \
-                      (1 - iou_channels[0])/4 + \
-                      (1 - iou_channels[1])/4 + \
-                      (1 - iou_channels[2])/4 + \
-                      (1 - iou_dilated_intersection)/4
+                      (1 - iou_background)/4 + \
+                      (1 - iou_chromosome)/4 + \
+                      (1 - iou_overlap)/4 + \
+                      (1 - iou_dilated_overlap)/4
 
         metrics = {
-            f"{dataset_name}_iou_background": iou_channels[0],
-            f"{dataset_name}_iou_ch": iou_channels[1],
-            f"{dataset_name}_iou_overlap": iou_channels[2],
-            f"{dataset_name}_iou_3category": iou_3category,
-            f"{dataset_name}_iou_dilated_intersection": iou_dilated_intersection,
+            f"{dataset_name}_iou_background": iou_background,
+            f"{dataset_name}_iou_chromosome": iou_chromosome,
+            f"{dataset_name}_iou_overlap": iou_overlap,
+            f"{dataset_name}_average_iou_classes": average_iou_classes,
+            f"{dataset_name}_iou_dilated_overlap": iou_dilated_overlap,
             f"{dataset_name}_average_angle": metric_average_angle,
             f"{dataset_name}_max_angle": metric_max_angle,
             f"{dataset_name}_main_metric": main_metric
@@ -615,9 +625,3 @@ def train_all():
 
 if __name__ == '__main__':
     train_all()
-
-
-
-
-
-
