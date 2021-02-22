@@ -106,24 +106,24 @@ def visualise(root_path, run_name, n_images, i_cv=0):
         dataloader_synthetic_test = dataloaders[1]
         dataloader_real_val = dataloaders[2]
         dataloader_real_test = dataloaders[3]
+        dataloader_original_val = dataloaders[4]
+        dataloader_original_test = dataloaders[5]
 
         iterator_synthetic_val = iter(dataloader_synthetic_val)
         iterator_synthetic_test = iter(dataloader_synthetic_test)
         iterator_real_val = iter(dataloader_real_val)
         iterator_real_test = iter(dataloader_real_test)
+        iterator_original_val = iter(dataloader_original_val)
+        iterator_original_test = iter(dataloader_original_test)
 
         data_iterators = {
             'synthetic_val': iterator_synthetic_val,
             'synthetic_test': iterator_synthetic_test,
             'real_val': iterator_real_val,
-            'real_test': iterator_real_test}
-
-        dataloader_original_val = dataloaders[4]
-        dataloader_original_test = dataloaders[5]
-        iterator_original_val = iter(dataloader_original_val)
-        iterator_original_test = iter(dataloader_original_test)
-        data_iterators['original_val'] = iterator_original_val
-        data_iterators['original_test'] = iterator_original_test
+            'real_test': iterator_real_test,
+            'original_val': iterator_original_val,
+            'original_test': iterator_original_test
+        }
 
         for dataset_name, dataset_iterator in data_iterators.items():
             image_i = 0
