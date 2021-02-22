@@ -506,7 +506,7 @@ class InstanceSegmentationModule(pl.LightningModule):
         iou_separate_chromosomes = torch.mean(torch.stack(all_iou_separate_chromosomes))
 
         metrics[f"{dataset_name}_n_chromosomes_difference"] = n_predicted_chromosomes_difference
-        metrics[f"{dataset_name}_iou_separate_chromosomes"] = iou_separate_chromosomes
+        metrics[f"{dataset_name}_average_iou_separate_chromosomes"] = iou_separate_chromosomes
 
         self.log_dict(metrics, on_epoch=True)
         return metrics
