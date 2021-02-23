@@ -103,7 +103,7 @@ def save_images(root_path, dirname, n_images, i_cv=0):
         image_i = 0
         while image_i < n_images:
             batch = next(dataset_iterator)
-            if image_i >= n_images:
+            if image_i >= n_images and dataset_name != 'real':
                 break
             batch_in = batch[:, 0:1, ...]
             batch_label = batch[:, 1:, ...]

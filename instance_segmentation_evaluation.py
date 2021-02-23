@@ -139,7 +139,7 @@ def visualise(root_path, run_name, n_images, i_cv=0):
 
                 batch_prediction_category = torch.argmax(batch_prediction[:, 0:3, ...], dim=1, keepdim=True)
                 batch_prediction_dilated_intersection = (batch_prediction[:, 3:4, ...] > 0).type(module.dtype)
-                batch_prediction_angle = da_vector_2_angle(batch_prediction[:, 4:, ...])
+                batch_prediction_angle = da_vector_2_angle(batch_prediction[:, 4:6, ...])
 
                 for batch_elem_i in range(batch.shape[0]):
                     if image_i >= n_images:
