@@ -29,7 +29,7 @@ class Clustering:
     The hyperparameters are saved in the __init__ function.
     """
     def __init__(self,
-                 minimum_dilated_intersection_area: int = 30,
+                 minimum_intersection_area: int = 6,
                  max_distance: int = 4,
                  merge_peaks_distance: int = 1,
                  minimum_clusters_area: int = 10,
@@ -55,7 +55,7 @@ class Clustering:
             a local neighbourhood of the intersection. (1-weight) used for whole channel direction similarity.
 
         """
-        self.minimum_dilated_intersection_area = minimum_dilated_intersection_area
+        self.minimum_intersection_area = minimum_intersection_area
         self.max_distance = max_distance
         self.merge_peaks_distance = merge_peaks_distance
         self.minimum_clusters_area = minimum_clusters_area
@@ -84,7 +84,7 @@ class Clustering:
         da_vector = angle_2_da_vector(direction_angle[None, :, :, :])[0]
 
         # delete areas of intersection that are too small
-        intersection, dilated_intersection = self.remove_small_intersection(intersection, dilated_intersection)
+        intersection = remove_small_areas(intersection, self.minimum_intersection_area)
 
         dilated_unique = np.logical_and(unique, np.logical_not(dilated_intersection))
 
@@ -106,27 +106,6 @@ class Clustering:
         separate_chromosomes = combine_channels_and_intersection(channels, intersection)
 
         return separate_chromosomes
-
-    def remove_small_intersection(self, intersection: np.ndarray, dilated_intersection: np.ndarray):
-        """
-        Deletes areas that are too small in the dilated intersection.
-        :param intersection:
-        :param dilated_intersection:
-        """
-        modified_intersection = intersection.copy()
-        modified_dilated_intersection = dilated_intersection.copy()
-
-        dilated_intersection = dilated_intersection.copy()
-        dilated_intersection_clusters, num_dilated_intersection_clusters = ndimage.label(dilated_intersection)
-        for i_dilated_intersection_clusters in range(1, num_dilated_intersection_clusters+1):
-            dilated_intersection_cluster = dilated_intersection_clusters == i_dilated_intersection_clusters
-            cluster_size = np.sum(dilated_intersection_cluster)
-            if cluster_size < self.minimum_dilated_intersection_area:
-                modified_dilated_intersection = np.logical_and(modified_dilated_intersection,
-                                                               np.logical_not(dilated_intersection_cluster))
-                modified_intersection = np.logical_and(modified_intersection,
-                                                       np.logical_not(dilated_intersection_cluster))
-        return modified_intersection, modified_dilated_intersection
 
     def distance_clustering(self, distance_image: np.ndarray) -> np.ndarray:
         """
@@ -432,6 +411,20 @@ def remove_small_channels(channels: np.ndarray, min_area: int) -> np.ndarray:
 
     channels = np.delete(channels, channels_to_delete, axis=0)
     return channels
+
+
+def remove_small_areas(image: np.ndarray, min_area: int) -> np.ndarray:
+    """
+    Removes small areas in a boolean image
+    :param image: boolean np array of shape (1, x, y)
+    :param min_area: What is the smallest number of pixels for an area to be kept
+    :return: boolean np array of shape (1, x, y)
+    """
+    clusters, num_clusters = ndimage.label(image)
+    channels = cluster_idx_2_channels(clusters)
+    channels = remove_small_channels(channels, min_area)
+    image = np.any(channels, axis=0, keepdims=True)
+    return image
 
 
 def calculate_average_da_vector(mask: np.ndarray, da_vector: np.ndarray, normalise: bool = False) \
