@@ -150,5 +150,5 @@ def save_all_images(n_images):
 
 
 if __name__ == '__main__':
-    evaluate_all()
+    # evaluate_all()
     save_all_images(10)

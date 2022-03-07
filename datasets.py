@@ -259,14 +259,14 @@ class SyntheticChromosomeDataset(IterableDataset):
                                                      0 where undefined
                                   'direction_ch_1' - the direction of chromosome 1 as an angle in range [0, pi]
                                                      0 where undefined
-                                  'intersection_dilated' - intersection for chromosome areas that are dilated by 1 pixel
-                                  'union_dilated' - union for chromosome areas that are dilated by 1 pixel
-                                  'unique_dilated' - unique for chromosome areas that are dilated by 1 pixel
-                                  'background_dilated' - background for chromosome areas that are dilated by 1 pixel
-                                  'ch_0_dilated' - ch_0 for chromosome areas that are dilated by 1 pixel
-                                  'ch_1_dilated' - ch_1 for chromosome areas that are dilated by 1 pixel
-                                  'ch_0_dilated_unique' - ch_0 and not ch_1 for chromosomes that are dilated by 1 pixel
-                                  'ch_1_dilated_unique' - ch_1 and not ch_0 for chromosomes that are dilated by 1 pixel
+                                  'intersection_dilated' - intersection for chromosome areas that are dilated
+                                  'union_dilated' - union for chromosome areas that are dilated
+                                  'unique_dilated' - unique for chromosome areas that are dilated
+                                  'background_dilated' - background for chromosome areas that are dilated
+                                  'ch_0_dilated' - ch_0 for chromosome areas that are dilated
+                                  'ch_1_dilated' - ch_1 for chromosome areas that are dilated
+                                  'ch_0_dilated_unique' - ch_0 and not ch_1 for chromosomes that are dilated by
+                                  'ch_1_dilated_unique' - ch_1 and not ch_0 for chromosomes that are dilated by
         """
         super(SyntheticChromosomeDataset, self).__init__()
         self.filepath_slides = filepath_slides
