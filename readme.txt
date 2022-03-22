@@ -1,3 +1,5 @@
+Using Orientation to Distinguish Overlapping Chromosomes
+
 Entry points:
 semantic_segmentation.py to train the semantic segmentation models
 semantic_segmentaiton_evaluation.py to evaluate pre-trained models
