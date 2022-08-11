@@ -237,8 +237,8 @@ class SyntheticChromosomeDataset(IterableDataset):
                                   'dapi' - dapi image, overlapping chromosomes added
                                   'cy3' - cy3 image, overlapping chromosomes added
                                   'dapi_cy3' - dapi and cy3 images added, overlapping chromosomes added
-                                  '3_category' - integer indices for (0: background, 1: unique, 2: intersection)
-                                  '4_category' - integer indeces for (0: background, 1: ch_0, 2: ch_1, 3: intersection)
+                                  '3_chanel' - integer indices for (0: background, 1: unique, 2: intersection)
+                                  '4_channel' - integer indeces for (0: background, 1: ch_0, 2: ch_1, 3: intersection)
                                   'intersection' - the area of intersection of the two chromosomes
                                   'union' - the area with a single chromosome or the intersection
                                   'unique' - the area with a single chromosome
